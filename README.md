@@ -3,7 +3,7 @@
 Model, context, and subscription quota in Herdr's Agent sidebar — grouped by
 Space, with brand icons that carry agent status.
 
-[![CI](https://github.com/levi-qiao/herdr-agent-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/levi-qiao/herdr-agent-usage/actions/workflows/ci.yml)
+[![CI](https://github.com/imchrisrueda/useful_tools/actions/workflows/ci.yml/badge.svg)](https://github.com/imchrisrueda/useful_tools/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [简体中文](README.zh-CN.md)
@@ -40,12 +40,12 @@ Requires **Herdr 0.9.0+**, the Rust toolchain pinned in `rust-toolchain.toml`,
 macOS or Linux, and a supported agent CLI.
 
 ```sh
-git clone https://github.com/levi-qiao/herdr-agent-usage.git
-cd herdr-agent-usage
+git clone https://github.com/imchrisrueda/useful_tools.git
+cd useful_tools
 ./install.sh
 ```
 
-The GitHub repository and Herdr plugin id are both `herdr-agent-usage`.
+The Herdr plugin id is `herdr-agent-usage`; this GitHub repository is named `useful_tools`.
 `./install.sh` adopts an existing `herdr-agent-quota` install even when Herdr
 has already switched the linked id, then unlinks the old id. The first launch
 of the new binary adopts the same directories. Run `./install.sh` after
@@ -87,7 +87,7 @@ Install and fully configure herdr-agent-usage on this computer until Herdr's
 Agent sidebar shows brand icons and quota for the agent CLIs I actually have.
 Stopping after ./install.sh is not done. Icons as boxes or "?" are unfinished.
 
-Repo: https://github.com/levi-qiao/herdr-agent-usage
+Repo: https://github.com/imchrisrueda/useful_tools
 If this working tree is already that repo, use it; otherwise clone it, cd in,
 and follow docs/agent-setup.md (English) or docs/agent-setup.zh-CN.md (中文).
 If you cannot read those files, do all of the following anyway.

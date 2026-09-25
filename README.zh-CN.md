@@ -3,7 +3,7 @@
 在 Herdr Agent 侧栏显示模型、上下文和订阅额度——按 Space 分组，并用品牌图标承载
 agent 状态。
 
-[![CI](https://github.com/levi-qiao/herdr-agent-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/levi-qiao/herdr-agent-usage/actions/workflows/ci.yml)
+[![CI](https://github.com/imchrisrueda/useful_tools/actions/workflows/ci.yml/badge.svg)](https://github.com/imchrisrueda/useful_tools/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md)
@@ -33,12 +33,12 @@ order 默认按 Space 分组，组内剩余额度最少的优先。
 以及受支持的 agent CLI。
 
 ```sh
-git clone https://github.com/levi-qiao/herdr-agent-usage.git
-cd herdr-agent-usage
+git clone https://github.com/imchrisrueda/useful_tools.git
+cd useful_tools
 ./install.sh
 ```
 
-GitHub 仓库名和 Herdr 插件 id 都是 `herdr-agent-usage`。`./install.sh` 会接管已有的
+Herdr 插件 id 是 `herdr-agent-usage`；此 GitHub 仓库名为 `useful_tools`。`./install.sh` 会接管已有的
 `herdr-agent-quota` 配置和状态，即使 Herdr 已经把链接换成新 id 也会从磁盘上的旧目录
 搬过去，然后再 unlink 仍在列表里的旧 id。新二进制第一次启动时也会搬 Herdr 注入的那两个
 目录。拉取之后请再跑一次 `./install.sh`，Cursor 的 hook 命令才会改写；在那之前旧脚本
@@ -75,7 +75,7 @@ Codex 或其他编程助手。完整步骤和命令见
 品牌图标，以及我实际安装了的那些 agent CLI 的额度。不要在 ./install.sh
 结束后停手。图标变成方框或问号都算没装完。
 
-仓库：https://github.com/levi-qiao/herdr-agent-usage
+仓库：https://github.com/imchrisrueda/useful_tools
 若当前工作区已经是该仓库就直接用；否则 clone 后进入目录，严格按照
 docs/agent-setup.zh-CN.md（中文）或 docs/agent-setup.md（英文）执行。
 读不到这两个文件时，仍须做完下面全部步骤。
