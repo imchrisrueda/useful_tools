@@ -160,42 +160,15 @@ fn parse_reset(value: &Value) -> Option<ResetAt> {
 /// the refresh path supplies pane session ids so an older pane is not lost
 /// behind the bounded `thread/list` page.
 pub fn fetch_for_sessions(session_ids: &[String]) -> Result<ProviderSnapshot> {
-    let mut command = codex_command();
-    command
-        .args(["app-server", "--stdio"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    #[cfg(unix)]
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setpgid(0, 0) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let mut child = command.spawn().context("start codex app-server")?;
-    let mut input = child.stdin.take().context("open codex app-server stdin")?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("open codex app-server stdout")?;
-    let mut output = BufReader::new(stdout);
+    let home = codex_home()?;
+    Ok(local_snapshot_at(&home, session_ids, CacheStore::now_unix()))
+}
 
-    // The watchdog and this thread share the child, so it can only ever be
-    // signalled while it is still unreaped. Signalling a bare pid after
-    // `wait` would race with the operating system recycling that pid.
-    let child = Arc::new(Mutex::new(Some(child)));
-    let watchdog = Arc::clone(&child);
-    thread::spawn(move || {
-        thread::sleep(REQUEST_TIMEOUT);
-        terminate(&watchdog);
-    });
-
-    let result = fetch_from_process(&mut input, &mut output, session_ids);
-    terminate(&child);
-    result
+pub fn local_snapshot_at(home: &Path, session_ids: &[String], now_unix: u64) -> ProviderSnapshot {
+    let mut snapshot = ProviderSnapshot::new(Provider::Codex, vec![], now_unix).session_local();
+    snapshot.source = "codex-rollout".to_string();
+    enrich_local_sessions_at(&mut snapshot, home, session_ids);
+    snapshot
 }
 
 /// Herdr runs hooks, actions, and the watcher with its server's PATH, which
@@ -291,11 +264,14 @@ fn session_ids_for_panes_at(
         else {
             continue;
         };
-        if wanted.contains(cwd.as_str())
-            && path
-                .file_name()
-                .is_some_and(|name| name.to_string_lossy().contains(session_id.as_str()))
-        {
+        let file_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_default();
+        let clean = file_name.strip_suffix(".zst").unwrap_or(&file_name);
+        let stem = clean.strip_suffix(".jsonl").unwrap_or(clean);
+        let id_matches = stem.ends_with(&format!("-{session_id}")) || stem == session_id.as_str();
+        if wanted.contains(cwd.as_str()) && id_matches {
             by_cwd
                 .entry(cwd)
                 .or_default()
@@ -527,6 +503,11 @@ fn enrich_local_sessions_at(snapshot: &mut ProviderSnapshot, home: &Path, sessio
         if let Some(model) = observation.model.clone() {
             snapshot.session_models.insert(session_id.clone(), model);
         }
+        if !observation.windows.is_empty() {
+            snapshot
+                .session_windows
+                .insert(session_id.clone(), observation.windows);
+        }
         let modified = fs::metadata(path)
             .and_then(|metadata| metadata.modified())
             .ok()
@@ -578,9 +559,11 @@ fn find_rollout_paths(home: &Path, session_ids: &[String]) -> BTreeMap<String, P
             }
             let name = entry.file_name();
             let name = name.to_string_lossy();
+            let clean = name.strip_suffix(".zst").unwrap_or(&name);
+            let stem = clean.strip_suffix(".jsonl").unwrap_or(clean);
             let matching_ids = session_ids
                 .iter()
-                .filter(|session_id| name.contains(session_id.as_str()));
+                .filter(|session_id| stem.ends_with(&format!("-{session_id}")) || stem == session_id.as_str());
             let modified = entry
                 .metadata()
                 .ok()
@@ -603,9 +586,12 @@ fn find_rollout_paths(home: &Path, session_ids: &[String]) -> BTreeMap<String, P
         .collect()
 }
 
+#[derive(Debug, Clone, Default)]
 struct RolloutObservation {
     model: Option<String>,
     context: Option<ContextUsage>,
+    windows: Vec<UsageWindow>,
+    last_timestamp: Option<u64>,
 }
 
 fn is_rollout_file(name: &str) -> bool {
@@ -673,6 +659,9 @@ fn read_rollout_observation(path: &Path, session_id: &str) -> Option<RolloutObse
         // file head: that is the first turn's model, not the current one.
         observation.model = read_latest_rollout_model(path);
     }
+    if observation.model.is_none() && observation.context.is_none() && observation.windows.is_empty() {
+        return None;
+    }
     Some(observation)
 }
 
@@ -734,10 +723,15 @@ fn next_reverse_cursor(start: u64, cursor: u64, floor: u64) -> Option<u64> {
 fn parse_rollout_observation(text: &str, session_id: &str) -> Option<RolloutObservation> {
     let mut model = None;
     let mut context = None;
+    let mut windows = Vec::new();
+    let mut last_timestamp = None;
     for line in text.lines() {
         let Ok(entry) = serde_json::from_str::<Value>(line) else {
             continue;
         };
+        if let Some(ts) = parse_rollout_timestamp(&entry) {
+            last_timestamp = Some(ts);
+        }
         if entry.get("type").and_then(Value::as_str) == Some("turn_context") {
             let payload = entry.get("payload").unwrap_or(&entry);
             model = parse_model_payload(payload).or(model);
@@ -749,6 +743,14 @@ fn parse_rollout_observation(text: &str, session_id: &str) -> Option<RolloutObse
         let payload = entry.get("payload").unwrap_or(&entry);
         if payload.get("type").and_then(Value::as_str) != Some("token_count") {
             continue;
+        }
+        let mut found_windows = collect_codex_windows(payload);
+        if found_windows.is_empty() {
+            let info = payload.get("info").unwrap_or(payload);
+            found_windows = collect_codex_windows(info);
+        }
+        if !found_windows.is_empty() {
+            windows = found_windows;
         }
         // Rollouts do not identify the serving account. A still-running old
         // session can write after auth.json changes, so its quota must never
@@ -796,12 +798,16 @@ fn parse_rollout_observation(text: &str, session_id: &str) -> Option<RolloutObse
                 None => cache,
             }
         });
-        let context_value = ContextUsage::new(used.clamp(0.0, 100.0))
-            .ok()?
-            .with_cache(cache);
-        context = Some(context_value);
+        if let Ok(context_value) = ContextUsage::new(used.clamp(0.0, 100.0)) {
+            context = Some(context_value.with_cache(cache));
+        }
     }
-    Some(RolloutObservation { model, context })
+    Some(RolloutObservation {
+        model,
+        context,
+        windows,
+        last_timestamp,
+    })
 }
 
 fn parse_rollout_timestamp(entry: &Value) -> Option<u64> {
@@ -943,7 +949,9 @@ pub fn auth_path() -> Result<PathBuf> {
 }
 
 fn codex_home() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").context("HOME is not set")?;
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .context("Neither HOME nor USERPROFILE is set")?;
     let home = PathBuf::from(home);
     Ok(std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
@@ -951,11 +959,11 @@ fn codex_home() -> Result<PathBuf> {
 }
 
 pub fn current_account_id() -> Option<String> {
-    account_id_from_auth(&auth_path().ok()?)
+    None
 }
 
 pub fn auth_mtime_unix() -> Option<u64> {
-    CacheStore::file_mtime_unix(&auth_path().ok()?)
+    None
 }
 
 pub fn account_id_from_auth(path: &Path) -> Option<String> {
@@ -1783,4 +1791,83 @@ mod tests {
         assert_eq!(observation.model.as_deref(), Some("later-model"));
         assert!((observation.context.unwrap().used_percent - 54.5454).abs() < 0.001);
     }
+
+    #[test]
+    fn recovers_from_corrupt_tail_and_keeps_latest_valid_observation() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/codex/rollout-corrupt-tail.jsonl");
+        let observation = read_rollout_observation(&fixture, "session-corrupt")
+            .expect("should parse valid prefix despite corrupt tail");
+        assert_eq!(observation.model.as_deref(), Some("gpt-5.6-luna"));
+        assert!(observation.context.is_some());
+    }
+
+    #[test]
+    fn extracts_rate_limits_from_rollout_into_observation_windows() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/codex/rollout-rate-limits.jsonl");
+        let observation = read_rollout_observation(&fixture, "session-rate-limits")
+            .expect("should parse rate limits");
+        assert_eq!(observation.model.as_deref(), Some("gpt-6-astra"));
+        assert_eq!(observation.windows.len(), 2);
+        let five_hour = observation
+            .windows
+            .iter()
+            .find(|w| w.kind == WindowKind::FiveHour)
+            .expect("five hour window");
+        assert_eq!(five_hour.used_percent, 65.0);
+        let weekly = observation
+            .windows
+            .iter()
+            .find(|w| w.kind == WindowKind::Weekly)
+            .expect("weekly window");
+        assert_eq!(weekly.used_percent, 25.0);
+    }
+
+    #[test]
+    fn tracks_dynamic_model_switch_to_latest_turn_context() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/codex/rollout-model-change.jsonl");
+        let observation = read_rollout_observation(&fixture, "session-model-change")
+            .expect("should parse model change");
+        assert_eq!(observation.model.as_deref(), Some("gpt-6-astra"));
+    }
+
+    #[test]
+    fn enrich_local_sessions_populates_session_windows_without_touching_global_windows() {
+        let directory = tempfile::tempdir().unwrap();
+        let sessions_dir = directory.path().join("sessions/2026/09/22");
+        fs::create_dir_all(&sessions_dir).unwrap();
+        let fixture = include_str!("../../tests/fixtures/codex/rollout-rate-limits.jsonl");
+        fs::write(
+            sessions_dir.join("rollout-2026-09-22T13-01-40-session-rate-limits.jsonl"),
+            fixture,
+        )
+        .unwrap();
+
+        let mut snapshot = ProviderSnapshot::new(Provider::Codex, vec![], 1_786_795_200);
+        enrich_local_sessions_at(
+            &mut snapshot,
+            directory.path(),
+            &["session-rate-limits".to_string()],
+        );
+
+        // Global windows must remain empty (session quota only!)
+        assert!(snapshot.windows.is_empty());
+        // Session windows must contain the extracted windows
+        assert!(snapshot.session_windows.contains_key("session-rate-limits"));
+        let windows = snapshot
+            .session_windows
+            .get("session-rate-limits")
+            .unwrap();
+        assert_eq!(windows.len(), 2);
+        assert_eq!(
+            snapshot
+                .session_models
+                .get("session-rate-limits")
+                .map(String::as_str),
+            Some("gpt-6-astra")
+        );
+    }
 }
+

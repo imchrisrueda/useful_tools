@@ -55,10 +55,11 @@ pub fn uninstall_at(settings: &Path, state: &Path) -> Result<()> {
 /// subagent conversation while statusLine still describes the parent; the
 /// pane id is inherited by both and stays stable across that mismatch.
 fn observation_for_cache(value: &Value, pane_id: Option<&str>) -> Value {
+    let clean = crate::cache::sanitize_statusline_payload(value);
     let Some(pane_id) = pane_id.filter(|pane_id| !pane_id.is_empty()) else {
-        return value.clone();
+        return clean;
     };
-    let mut observation = value.clone();
+    let mut observation = clean;
     if let Some(object) = observation.as_object_mut() {
         object.insert("session_id".to_string(), Value::String(pane_id.to_string()));
     }
@@ -130,5 +131,49 @@ mod tests {
         });
         assert_eq!(observation_for_cache(&original, None), original);
         assert_eq!(observation_for_cache(&original, Some("")), original);
+    }
+
+    #[test]
+    fn cache_observation_strips_sensitive_prompts_and_tokens() {
+        let raw = json!({
+            "session_id": "conv-1",
+            "conversation_id": "conv-1",
+            "prompt": "confidential user prompt",
+            "messages": [{"role": "user", "content": "secret password"}],
+            "api_key": "secret-key-12345",
+            "unknown_metadata": {"internal_env": "production"},
+            "model": {"display_name": "Gemini 2.5 Pro"},
+            "quota": {
+                "gemini-5h": {"remaining_fraction": 0.85, "reset_in_seconds": 3600},
+                "secret_pool": {"secret": "val"}
+            },
+            "context_window": {
+                "used_percentage": 25.0,
+                "secret_detail": "should be stripped"
+            }
+        });
+
+        let cached = observation_for_cache(&raw, Some("w1:p2"));
+
+        // Must preserve whitelisted fields
+        assert_eq!(cached.get("session_id").and_then(Value::as_str), Some("w1:p2"));
+        assert_eq!(cached.get("conversation_id").and_then(Value::as_str), Some("conv-1"));
+        assert_eq!(
+            cached.get("model").and_then(|m| m.get("display_name")).and_then(Value::as_str),
+            Some("Gemini 2.5 Pro")
+        );
+        assert!(cached.get("quota").and_then(|q| q.get("gemini-5h")).is_some());
+        assert_eq!(
+            cached.get("context_window").and_then(|c| c.get("used_percentage")).and_then(Value::as_f64),
+            Some(25.0)
+        );
+
+        // Must strictly strip sensitive non-whitelisted fields
+        assert!(cached.get("prompt").is_none());
+        assert!(cached.get("messages").is_none());
+        assert!(cached.get("api_key").is_none());
+        assert!(cached.get("unknown_metadata").is_none());
+        assert!(cached.get("quota").and_then(|q| q.get("secret_pool")).is_none());
+        assert!(cached.get("context_window").and_then(|c| c.get("secret_detail")).is_none());
     }
 }

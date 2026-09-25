@@ -10,27 +10,7 @@ fn main() -> Result<()> {
             provider,
             force,
             json,
-            keychain_approve,
-        } => {
-            if keychain_approve {
-                let providers = provider.providers();
-                let muse = providers.contains(&herdr_agent_quota::model::Provider::Muse);
-                let cursor = providers.contains(&herdr_agent_quota::model::Provider::Cursor);
-                if !muse && !cursor {
-                    anyhow::bail!(
-                        "--keychain-approve only applies to muse or cursor; run `refresh --provider cursor --keychain-approve`"
-                    );
-                }
-                if muse {
-                    herdr_agent_quota::providers::muse::set_keychain_approve_attempt();
-                }
-                if cursor {
-                    herdr_agent_quota::providers::cursor::set_keychain_approve_attempt();
-                }
-                return herdr_agent_quota::refresh::run(&providers, force, json);
-            }
-            herdr_agent_quota::refresh::run(&provider.providers(), force, json)
-        }
+        } => herdr_agent_quota::refresh::run(&provider.providers(), force, json),
         Command::Watch {
             provider,
             interval_seconds,
@@ -72,8 +52,6 @@ fn main() -> Result<()> {
                 low_quota_alert,
             },
         ),
-        Command::ClaudeStatusline => herdr_agent_quota::configure::claude::run_statusline_hook(),
         Command::AgyStatusline => herdr_agent_quota::configure::agy::run_statusline_hook(),
-        Command::CursorHooks => herdr_agent_quota::configure::cursor::run_hook(),
     }
 }

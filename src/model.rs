@@ -1,144 +1,70 @@
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use thiserror::Error;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-/// Original-four quota collector (the subscription billed for a pane).
+/// Original quota collector (the subscription billed for a pane).
 ///
 /// Distinct from [`Harness`], the Herdr agent drawing the pane. A Herdr agent
 /// name is not itself a collector: parse it as a harness first, then take
-/// [`Harness::billing`]. Cache filenames and the `provider` serde tag stay
-/// 1:1 with 0.2 snapshots.
+/// [`Harness::billing`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     Codex,
-    Grok,
-    Claude,
     Agy,
-    /// OpenCode's Go subscription. Deliberately absent from [`Provider::ALL`]:
-    /// it has no 1:1 harness mapping and is only ever fetched for a pane that
-    /// resolved to it, so the original four keep their exact refresh behavior.
-    OpenCodeGo,
-    /// Quota reported by omp's own provider-agnostic usage layer. This is a
-    /// scoped collector only; it is never part of a bare provider refresh.
-    Omp,
-    /// Quota reported by Devin CLI's Connect RPC API. A 1:1 harness→billing
-    /// mapping like the original four, refreshed through `--provider all`.
-    Devin,
-    /// Muse Code's subscription windows, read from the key call the CLI makes.
-    /// A 1:1 harness→billing mapping refreshed through `--provider all`.
-    Muse,
-    /// Cursor Agent CLI's included monthly pool, read from DashboardService.
-    /// A 1:1 harness→billing mapping refreshed through `--provider all`.
-    Cursor,
 }
 
-/// Quota collector identity. The original four keep the historical
-/// [`Provider`] name so 0.2 cache files and CLI flags stay compatible.
+/// Quota collector identity.
 pub type Billing = Provider;
 
 impl Provider {
-    /// The collectors a bare `--provider all` refreshes. OpenCode Go is not
-    /// here on purpose; see the variant's note.
-    pub const ALL: [Self; 7] = [
+    /// The collectors a bare `--provider all` refreshes.
+    pub const ALL: [Self; 2] = [
         Self::Codex,
-        Self::Grok,
-        Self::Claude,
         Self::Agy,
-        Self::Devin,
-        Self::Muse,
-        Self::Cursor,
     ];
 
     /// Collectors fetched only for a pane that resolved to them.
-    ///
-    /// They are never refreshed through the provider list, so the dashboard
-    /// shows one only once it has something cached — a permanent
-    /// "unavailable" row for a subscription the user does not have would be
-    /// noise, not information.
-    pub const SCOPED: [Self; 1] = [Self::OpenCodeGo];
+    pub const SCOPED: [Self; 0] = [];
 
     pub fn display_name(self) -> &'static str {
         match self {
             Self::Codex => "Codex",
-            Self::Grok => "Grok",
-            Self::Claude => "Claude",
             Self::Agy => "Agy",
-            Self::OpenCodeGo => "OpenCode Go",
-            Self::Omp => "OMP",
-            Self::Devin => "Devin",
-            Self::Muse => "Muse",
-            Self::Cursor => "Cursor",
         }
     }
 
     pub fn source(self) -> &'static str {
         match self {
             Self::Codex => "codex-app-server",
-            Self::Grok => "grok-cli-billing",
-            Self::Claude => "claude-statusline",
             Self::Agy => "agy-statusline",
-            // Scoped to the OpenCode credential store so it can never collide
-            // with the original four's 0.2 filenames.
-            Self::OpenCodeGo => "opencode-go.opencode-store",
-            Self::Omp => "omp-usage",
-            Self::Devin => "devin-cli-billing",
-            Self::Muse => "muse-code-subscription",
-            Self::Cursor => "cursor-dashboard-usage",
         }
     }
 }
 
-/// The agent drawing a Herdr pane. Distinct from [`Billing`]: harnesses without
-/// a 1:1 collector may still resolve an exact session to a scoped billing
-/// target (for example, Pi to canonical Codex after an account-id match).
+/// The agent drawing a Herdr pane. Distinct from [`Billing`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Harness {
     Codex,
-    Grok,
-    Claude,
     Agy,
-    OpenCode,
-    Pi,
-    Omp,
-    Devin,
-    Muse,
-    Cursor,
 }
 
 impl Harness {
-    /// Classify a Herdr `agent` field. Unknown names are `None`, not a
-    /// collector fallback.
+    /// Classify a Herdr `agent` field. Unknown names are `None`.
     pub fn from_agent_name(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
             "codex" => Some(Self::Codex),
-            "grok" => Some(Self::Grok),
-            "claude" | "claude-code" | "anthropic" => Some(Self::Claude),
             "agy" | "antigravity" | "antigravity-cli" => Some(Self::Agy),
-            "opencode" => Some(Self::OpenCode),
-            "pi" => Some(Self::Pi),
-            "omp" => Some(Self::Omp),
-            "devin" | "devin-cli" => Some(Self::Devin),
-            "muse" | "muse-code" => Some(Self::Muse),
-            "cursor" | "cursor-agent" | "cursor-cli" => Some(Self::Cursor),
             _ => None,
         }
     }
 
-    /// Original-four 1:1 map. Named harnesses without a collector, and
-    /// unknown names, return `None`.
+    /// Map to billing provider.
     pub fn billing(self) -> Option<Billing> {
         match self {
             Self::Codex => Some(Provider::Codex),
-            Self::Grok => Some(Provider::Grok),
-            Self::Claude => Some(Provider::Claude),
             Self::Agy => Some(Provider::Agy),
-            Self::Devin => Some(Provider::Devin),
-            Self::Muse => Some(Provider::Muse),
-            Self::Cursor => Some(Provider::Cursor),
-            Self::OpenCode | Self::Pi | Self::Omp => None,
         }
     }
 
@@ -152,14 +78,7 @@ impl Harness {
 pub struct CredentialScope(&'static str);
 
 impl CredentialScope {
-    /// Canonical CLI stores for the original four collectors.
     pub const CANONICAL: Self = Self("canonical");
-    /// OpenCode default data store (`$XDG_DATA_HOME/opencode` or `~/.local/share/opencode`).
-    pub const OPENCODE_STORE: Self = Self("opencode-store");
-    /// omp's own credential store (`<agent dir>/agent.db`). An omp pane is
-    /// billed to a subscription this plugin can also collect canonically, so
-    /// the scope is what keeps the two apart.
-    pub const OMP_STORE: Self = Self("omp-store");
 
     pub fn as_str(self) -> &'static str {
         self.0
@@ -171,10 +90,6 @@ impl CredentialScope {
 pub struct BillingTarget {
     pub billing: Provider,
     pub credential_scope: CredentialScope,
-    /// Stable discriminator for dynamic scoped collectors. OMP provider ids
-    /// are hashed so two providers never share a cache or debounce marker and
-    /// an arbitrary upstream id never becomes a filesystem path.
-    scope_hash: Option<[u8; 32]>,
 }
 
 impl BillingTarget {
@@ -182,69 +97,17 @@ impl BillingTarget {
         Self {
             billing: provider,
             credential_scope: CredentialScope::CANONICAL,
-            scope_hash: None,
         }
     }
 
-    pub fn opencode_go() -> Self {
-        Self {
-            billing: Provider::OpenCodeGo,
-            credential_scope: CredentialScope::OPENCODE_STORE,
-            scope_hash: None,
-        }
-    }
-
-    /// An omp-scoped target for a subscription omp routes a pane to.
-    pub fn omp(provider_id: &str) -> Self {
-        Self {
-            billing: Provider::Omp,
-            credential_scope: CredentialScope::OMP_STORE,
-            scope_hash: Some(Sha256::digest(provider_id.as_bytes()).into()),
-        }
-    }
-
-    /// The billing identity when it is one of the original four collectors.
-    ///
-    /// Those are refreshed through the provider list; anything else is fetched
-    /// only for the pane that resolved to it.
     pub fn original_provider(self) -> Option<Provider> {
         Provider::ALL
             .contains(&self.billing)
             .then_some(self.billing)
     }
 
-    /// Cache, lease, and refresh-marker filename stem.
-    ///
-    /// One authority for every target: the original four keep their 0.2 source
-    /// ids, and a scoped target carries its credential scope in the stem so it
-    /// cannot collide with them.
     pub fn cache_identity(self) -> String {
-        if self.credential_scope == CredentialScope::OMP_STORE {
-            let discriminator = self
-                .scope_hash
-                .map(|hash| {
-                    hash.iter()
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect::<String>()
-                })
-                .unwrap_or_else(|| "unknown".to_string());
-            return format!(
-                "{}-{discriminator}.{}",
-                self.billing.source(),
-                self.credential_scope.as_str()
-            );
-        }
-        let source = self.billing.source();
-        // OpenCode Go's 0.2 source id already carries its scope; the original
-        // four carry none because canonical is the absence of one. Anything
-        // else appends its scope so an omp-billed Claude can never overwrite
-        // the canonical Claude snapshot.
-        if self.credential_scope == CredentialScope::CANONICAL
-            || source.ends_with(self.credential_scope.as_str())
-        {
-            return source.to_string();
-        }
-        format!("{source}.{}", self.credential_scope.as_str())
+        self.billing.source().to_string()
     }
 }
 
@@ -749,9 +612,6 @@ impl ProviderSnapshot {
             return Some(model);
         }
         match self.provider {
-            // A Muse session with no completed model call yet runs the
-            // `settings.json` default, like a fresh Devin session.
-            Provider::Devin | Provider::Muse | Provider::Cursor => self.model.as_deref(),
             Provider::Agy if self.only_observed_session() == Some(session_id) => {
                 self.model.as_deref()
             }
@@ -780,40 +640,29 @@ impl ProviderSnapshot {
         }
     }
 
-    /// Return freshness evidence for one Claude session-local quota window.
-    ///
-    /// Other providers and non-session-local snapshots deliberately have no
-    /// observation record here.
+    /// Return freshness evidence for one session-local quota window.
     pub fn quota_observation_for_session(
         &self,
-        session_id: Option<&str>,
-        kind: WindowKind,
+        _session_id: Option<&str>,
+        _kind: WindowKind,
     ) -> Option<&SessionQuotaObservation> {
-        if self.provider != Provider::Claude || !self.session_quota_only {
-            return None;
-        }
-        let session_id = session_id.and_then(|id| self.session_for_lookup(id))?;
-        self.session_quota_observations
-            .get(session_id)?
-            .iter()
-            .find(|observation| observation.kind == kind)
+        None
     }
 
     /// Return the quota windows for a pane's session.
     ///
-    /// Context and model are session-local. Grok, Codex, and Devin have
-    /// provider-level quota windows. Claude and Agy statusLine windows stay
-    /// keyed by conversation: Agy's quota belongs to the account, but the
-    /// active conversation's model selects the gemini or 3p pool.
+    /// Context and model are session-local. Codex has provider-level quota
+    /// windows. Agy statusLine windows stay keyed by conversation: Agy's
+    /// quota belongs to the account, but the active conversation's model selects
+    /// the gemini or 3p pool.
     ///
     /// Lookup order:
     /// 1. Agy with no Herdr session id → latest top-level statusLine windows.
     /// 2. Session-local snapshot → exact session windows; Agy may bridge an
     ///    unmatched subagent id only when exactly one conversation is stored.
-    /// 3. Session has a legacy Claude profile scope → canonical scope windows.
+    /// 3. Session has a legacy profile scope → canonical scope windows.
     /// 4. Session has legacy `session_windows` → those.
-    /// 5. Every keyed map is empty → top-level windows (Grok/Codex/Devin and a
-    ///    StatusLine cache written before session maps existed).
+    /// 5. Every keyed map is empty → top-level windows.
     /// 6. Keyed maps exist but this session is unknown → empty.
     pub fn windows_for_session(&self, session_id: Option<&str>) -> &[UsageWindow] {
         if self.provider == Provider::Agy && session_id.is_none() {
@@ -857,17 +706,13 @@ impl ProviderSnapshot {
     /// Whether this cached snapshot still belongs to the signed-in account.
     ///
     /// A failed refresh must keep the last good value for the *current*
-    /// account, not a previous login. After an account switch:
-    /// - snapshots stamped with another `account_id` are unusable;
-    /// - unstamped snapshots are unusable when the credential file is newer
-    ///   than `fetched_at_unix`, including Codex `auth.json` rewrites that do
-    ///   not expose an id.
+    /// account, not a previous login.
     pub fn usable_for_account(
         &self,
         current_account_id: Option<&str>,
         credentials_mtime_unix: Option<u64>,
     ) -> bool {
-        if matches!(self.provider, Provider::Claude | Provider::Agy)
+        if self.provider == Provider::Agy
             && self.account_id.is_none()
             && !self.session_quota_only
         {
@@ -905,22 +750,12 @@ impl ProviderSnapshot {
     }
 
     /// True when the windows this pane would render have already reset.
-    ///
-    /// Codex/Grok/Devin share provider-level windows. Claude keys windows by
-    /// session. Agy uses an exact or unambiguous statusLine conversation, so an
-    /// unrelated Agy pane cannot make this pane inherit a different pool.
     pub fn displayed_quota_has_expired(&self, session_id: Option<&str>, now_unix: u64) -> bool {
         quota_windows_expired(self.windows_for_session(session_id), now_unix)
     }
 
     /// Keep a previously observed quota window when the latest payload omits
-    /// it. Upstream often drops the short window for a tick (Claude statusLine
-    /// without `five_hour`, Codex `secondary: null` after a reset credit).
-    ///
-    /// This never invents percentages. An omitted window is restored only when
-    /// its reset is still in the future and a sibling window present in both
-    /// snapshots has not itself reset. An empty `windows` list still means
-    /// "rate limits were absent — clear stale quota".
+    /// it.
     pub fn merge_omitted_windows(&mut self, previous: &Self) {
         if !same_quota_account(self, previous) {
             return;
@@ -942,14 +777,7 @@ impl ProviderSnapshot {
     ) -> Severity {
         let live = live_windows(windows, now_unix);
         let relevant = match provider {
-            Provider::Grok | Provider::Cursor => long_window(&live),
-            Provider::Codex
-            | Provider::Claude
-            | Provider::Agy
-            | Provider::OpenCodeGo
-            | Provider::Omp
-            | Provider::Devin
-            | Provider::Muse => {
+            Provider::Codex | Provider::Agy => {
                 window_in(&live, WindowKind::FiveHour).or_else(|| long_window(&live))
             }
         };
@@ -1194,7 +1022,7 @@ mod tests {
         let cache = CacheUsage::from_token_counts(10, 90, 0)
             .unwrap()
             .with_session_totals(CacheTotals::from_token_counts(10, 90, 0), "old-session", 0);
-        let snapshot = ProviderSnapshot::new(Provider::Claude, vec![], 0).with_context(Some(
+        let snapshot = ProviderSnapshot::new(Provider::Agy, vec![], 0).with_context(Some(
             ContextUsage::new(23.5).unwrap().with_cache(Some(cache)),
         ));
         assert!(snapshot.context_for_session(Some("new-session")).is_none());
@@ -1205,7 +1033,7 @@ mod tests {
         let cache = CacheUsage::from_token_counts(10, 90, 0)
             .unwrap()
             .with_session_totals(CacheTotals::from_token_counts(10, 90, 0), "old-session", 0);
-        for provider in [Provider::Codex, Provider::Grok] {
+        for provider in [Provider::Codex] {
             let snapshot = ProviderSnapshot::new(provider, vec![], 0).with_context(Some(
                 ContextUsage::new(23.5)
                     .unwrap()
@@ -1220,7 +1048,7 @@ mod tests {
 
     #[test]
     fn cached_snapshot_from_another_account_is_not_usable() {
-        let snapshot = ProviderSnapshot::new(Provider::Grok, vec![], 100)
+        let snapshot = ProviderSnapshot::new(Provider::Codex, vec![], 100)
             .with_account_id(Some("account-a".to_string()));
         assert!(!snapshot.usable_for_account(Some("account-b"), Some(50)));
         assert!(snapshot.usable_for_account(Some("account-a"), Some(200)));
@@ -1228,7 +1056,7 @@ mod tests {
 
     #[test]
     fn legacy_snapshot_is_dropped_when_credentials_are_newer_than_the_fetch() {
-        let snapshot = ProviderSnapshot::new(Provider::Grok, vec![], 100);
+        let snapshot = ProviderSnapshot::new(Provider::Codex, vec![], 100);
         assert!(!snapshot.usable_for_account(Some("account-b"), Some(150)));
         assert!(!snapshot.usable_for_account(Some("account-b"), Some(100)));
         assert!(!snapshot.usable_for_account(Some("account-b"), Some(50)));
@@ -1239,7 +1067,7 @@ mod tests {
     #[test]
     fn old_snapshots_deserialize_without_account_id() {
         let snapshot: ProviderSnapshot = serde_json::from_str(
-            r#"{"provider":"grok","source":"grok-cli-billing","fetched_at_unix":1,"windows":[]}"#,
+            r#"{"provider":"codex","source":"codex-app-server","fetched_at_unix":1,"windows":[]}"#,
         )
         .unwrap();
         assert_eq!(snapshot.account_id, None);
@@ -1372,8 +1200,9 @@ mod tests {
 
     #[test]
     fn provider_aliases_are_explicit() {
-        assert_eq!("claude-code".parse::<Provider>().unwrap(), Provider::Claude);
+        assert_eq!("codex".parse::<Provider>().unwrap(), Provider::Codex);
         assert_eq!("antigravity".parse::<Provider>().unwrap(), Provider::Agy);
+        assert!("claude".parse::<Provider>().is_err());
         assert!("opencode".parse::<Provider>().is_err());
         assert!("OpenCode".parse::<Provider>().is_err());
         assert!("pi".parse::<Provider>().is_err());
@@ -1393,76 +1222,28 @@ mod tests {
     }
 
     #[test]
-    fn opencode_go_cache_identity_cannot_borrow_original_four_files() {
-        let target = BillingTarget::opencode_go();
-        assert_eq!(target.cache_identity(), "opencode-go.opencode-store");
-        assert_eq!(target.credential_scope, CredentialScope::OPENCODE_STORE);
-        assert!(target.original_provider().is_none());
-        for provider in Provider::ALL {
-            let original = BillingTarget::original_four(provider);
-            assert_eq!(original.cache_identity(), provider.source());
-            assert_eq!(original.credential_scope, CredentialScope::CANONICAL);
-            assert_ne!(target.cache_identity(), original.cache_identity());
-            assert!(!target.cache_identity().contains(provider.source()));
-        }
-    }
-
-    #[test]
     fn harness_identity_is_not_a_quota_collector() {
+        assert_eq!(Harness::from_agent_name("codex"), Some(Harness::Codex));
+        assert_eq!(Harness::from_agent_name("agy"), Some(Harness::Agy));
         assert_eq!(
-            Harness::from_agent_name("OpenCode"),
-            Some(Harness::OpenCode)
-        );
-        assert_eq!(
-            Harness::from_agent_name("opencode"),
-            Some(Harness::OpenCode)
-        );
-        assert_eq!(Harness::billing_for_agent("opencode"), None);
-        assert_eq!(Harness::billing_for_agent("pi"), None);
-        assert_eq!(Harness::billing_for_agent("cursor"), Some(Provider::Cursor));
-        assert_eq!(
-            Harness::billing_for_agent("cursor-agent"),
-            Some(Provider::Cursor)
-        );
-        assert_eq!(
-            Harness::billing_for_agent("claude-code"),
-            Some(Provider::Claude)
-        );
-        assert_eq!(
-            Harness::billing_for_agent("antigravity"),
-            Some(Provider::Agy)
+            Harness::from_agent_name("antigravity"),
+            Some(Harness::Agy)
         );
         assert_eq!(Harness::billing_for_agent("codex"), Some(Provider::Codex));
-        assert_eq!(Harness::billing_for_agent("grok"), Some(Provider::Grok));
-        assert_eq!(Harness::billing_for_agent("devin"), Some(Provider::Devin));
-        assert_eq!(
-            Harness::billing_for_agent("devin-cli"),
-            Some(Provider::Devin)
-        );
-        assert_eq!(Harness::billing_for_agent("muse"), Some(Provider::Muse));
-        assert_eq!(
-            Harness::billing_for_agent("muse-code"),
-            Some(Provider::Muse)
-        );
+        assert_eq!(Harness::billing_for_agent("agy"), Some(Provider::Agy));
+        assert_eq!(Harness::from_agent_name("opencode"), None);
+        assert_eq!(Harness::billing_for_agent("opencode"), None);
+        assert_eq!(Harness::from_agent_name("claude"), None);
+        assert_eq!(Harness::billing_for_agent("claude"), None);
     }
 
     #[test]
-    fn original_four_v0_2_snapshots_deserialize_with_canonical_sources() {
+    fn original_v0_2_snapshots_deserialize_with_canonical_sources() {
         let cases = [
             (
                 r#"{"provider":"codex","source":"codex-app-server","fetched_at_unix":1,"windows":[]}"#,
                 Provider::Codex,
                 "codex-app-server",
-            ),
-            (
-                r#"{"provider":"grok","source":"grok-cli-billing","fetched_at_unix":1,"windows":[]}"#,
-                Provider::Grok,
-                "grok-cli-billing",
-            ),
-            (
-                r#"{"provider":"claude","source":"claude-statusline","fetched_at_unix":1,"windows":[]}"#,
-                Provider::Claude,
-                "claude-statusline",
             ),
             (
                 r#"{"provider":"agy","source":"agy-statusline","fetched_at_unix":1,"windows":[]}"#,
@@ -1485,7 +1266,7 @@ mod tests {
     #[test]
     fn omitted_five_hour_window_is_kept_when_weekly_did_not_reset() {
         let previous = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Codex,
             vec![
                 quota_window(WindowKind::FiveHour, 22.0, 2_000),
                 quota_window(WindowKind::Weekly, 65.0, 10_000),
@@ -1493,7 +1274,7 @@ mod tests {
             1_000,
         );
         let mut current = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Codex,
             vec![quota_window(WindowKind::Weekly, 66.0, 10_000)],
             1_100,
         );
@@ -1579,14 +1360,14 @@ mod tests {
     #[test]
     fn empty_windows_still_clear_stale_quota() {
         let previous = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Codex,
             vec![
                 quota_window(WindowKind::FiveHour, 22.0, 2_000),
                 quota_window(WindowKind::Weekly, 65.0, 10_000),
             ],
             1_000,
         );
-        let mut current = ProviderSnapshot::new(Provider::Claude, vec![], 1_100);
+        let mut current = ProviderSnapshot::new(Provider::Codex, vec![], 1_100);
         current.merge_omitted_windows(&previous);
         assert!(current.windows.is_empty());
     }
@@ -1594,7 +1375,7 @@ mod tests {
     #[test]
     fn expired_five_hour_window_is_not_preserved() {
         let previous = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Codex,
             vec![
                 quota_window(WindowKind::FiveHour, 22.0, 1_050),
                 quota_window(WindowKind::Weekly, 65.0, 10_000),
@@ -1602,7 +1383,7 @@ mod tests {
             1_000,
         );
         let mut current = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Codex,
             vec![quota_window(WindowKind::Weekly, 65.0, 10_000)],
             1_100,
         );
@@ -1611,24 +1392,9 @@ mod tests {
     }
 
     #[test]
-    fn claude_known_session_does_not_borrow_the_provider_model() {
-        let mut snapshot = ProviderSnapshot::new(Provider::Claude, vec![], 0)
-            .with_model(Some("latest".to_string()));
-        snapshot
-            .session_models
-            .insert("session-1".to_string(), "Sonnet".to_string());
-        assert_eq!(
-            snapshot.model_for_session(Some("session-1")),
-            Some("Sonnet")
-        );
-        assert_eq!(snapshot.model_for_session(Some("session-2")), None);
-        assert_eq!(snapshot.model_for_session(None), Some("latest"));
-    }
-
-    #[test]
-    fn claude_session_with_windows_does_not_borrow_provider_model_or_context() {
+    fn session_with_windows_does_not_borrow_provider_model_or_context() {
         let mut snapshot = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Agy,
             vec![quota_window(WindowKind::FiveHour, 10.0, 10_000)],
             0,
         )
@@ -1662,35 +1428,9 @@ mod tests {
     }
 
     #[test]
-    fn devin_new_session_without_model_switch_uses_config_default() {
-        let mut snapshot = ProviderSnapshot::new(Provider::Devin, vec![], 0)
-            .with_model(Some("SWE-1.7 Medium".to_string()));
-        // A brand-new Devin session has a Herdr session id but no /model entry.
-        assert_eq!(
-            snapshot.model_for_session(Some("session-a")),
-            Some("SWE-1.7 Medium")
-        );
-        assert_eq!(
-            snapshot.model_for_session(Some("session-b")),
-            Some("SWE-1.7 Medium")
-        );
-        snapshot
-            .session_models
-            .insert("session-a".to_string(), "Opus 4.6".to_string());
-        assert_eq!(
-            snapshot.model_for_session(Some("session-a")),
-            Some("Opus 4.6")
-        );
-        assert_eq!(
-            snapshot.model_for_session(Some("session-b")),
-            Some("SWE-1.7 Medium")
-        );
-    }
-
-    #[test]
     fn account_level_windows_are_shared_when_no_session_has_reported() {
         let snapshot = ProviderSnapshot::new(
-            Provider::Grok,
+            Provider::Codex,
             vec![quota_window(WindowKind::Weekly, 31.0, 10_000)],
             1,
         );
@@ -1714,7 +1454,7 @@ mod tests {
     #[test]
     fn statusline_windows_do_not_leak_across_sessions() {
         let mut snapshot = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Agy,
             vec![quota_window(WindowKind::Weekly, 90.0, 10_000)],
             1,
         );
@@ -1948,9 +1688,9 @@ mod tests {
     }
 
     #[test]
-    fn claude_profile_scope_shares_the_latest_quota_across_sessions() {
+    fn profile_scope_shares_the_latest_quota_across_sessions() {
         let mut snapshot = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Agy,
             vec![quota_window(WindowKind::FiveHour, 92.0, 16_000)],
             1,
         );
@@ -1992,9 +1732,9 @@ mod tests {
     }
 
     #[test]
-    fn claude_profile_scopes_stay_isolated_when_reset_times_match() {
+    fn profile_scopes_stay_isolated_when_reset_times_match() {
         let mut snapshot = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Agy,
             vec![quota_window(WindowKind::FiveHour, 82.0, 16_000)],
             1,
         );
@@ -2036,8 +1776,8 @@ mod tests {
     fn legacy_snapshots_deserialize_without_quota_scope_maps() {
         let snapshot: ProviderSnapshot = serde_json::from_str(
             r#"{
-                "provider":"claude",
-                "source":"claude-statusline",
+                "provider":"agy",
+                "source":"agy-statusline",
                 "fetched_at_unix":1,
                 "windows":[{"kind":"five_hour","used_percent":90.0,"remaining_percent":10.0}],
                 "session_windows":{
@@ -2098,7 +1838,7 @@ mod tests {
         );
         assert!(!undated.has_expired_quota(5_000));
         assert!(!ProviderSnapshot::new(Provider::Codex, vec![], 1_000).has_expired_quota(5_000));
-        let mut session = ProviderSnapshot::new(Provider::Claude, vec![], 1_000);
+        let mut session = ProviderSnapshot::new(Provider::Agy, vec![], 1_000);
         session.session_windows.insert(
             "s1".to_string(),
             vec![quota_window(WindowKind::FiveHour, 90.0, 1_000)],

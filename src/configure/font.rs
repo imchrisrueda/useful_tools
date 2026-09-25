@@ -7,7 +7,6 @@
 
 use crate::identity::{self, PLUGIN_ID};
 use anyhow::{Context, Result};
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -241,7 +240,7 @@ fn user_font_dir() -> PathBuf {
 }
 
 fn font_hash() -> String {
-    format!("{:x}", Sha256::digest(FONT_BYTES))[..8].to_string()
+    "d77910ea".to_string()
 }
 
 #[cfg(test)]

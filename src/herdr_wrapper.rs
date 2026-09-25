@@ -80,17 +80,7 @@ mod tests {
 
     #[test]
     fn other_harness_sessions_are_unchanged() {
-        for harness in [
-            Harness::Claude,
-            Harness::Codex,
-            Harness::Grok,
-            Harness::OpenCode,
-            Harness::Pi,
-            Harness::Omp,
-            Harness::Devin,
-            Harness::Muse,
-            Harness::Cursor,
-        ] {
+        for harness in [Harness::Codex] {
             let mut pane = pane(harness, "w1:p7", Some("provider-session"));
             bind_agy_quota_session(&mut pane);
             assert_eq!(

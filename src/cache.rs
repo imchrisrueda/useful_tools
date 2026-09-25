@@ -336,7 +336,8 @@ impl CacheStore {
         api_generation: Option<&str>,
     ) -> Result<()> {
         self.ensure()?;
-        let session_id = statusline_session_id(observation);
+        let clean_observation = sanitize_statusline_payload(observation);
+        let session_id = statusline_session_id(&clean_observation);
         if let Some(session_id) = session_id {
             if let Some(cache) = snapshot
                 .context
@@ -391,7 +392,7 @@ impl CacheStore {
         prune_session_diagnostics(&mut snapshot, &current_session_ids);
         let saved = StatuslineObservation {
             snapshot,
-            payload: observation.clone(),
+            payload: clean_observation,
         };
         let destination = self.statusline_observation_path(provider);
         let temporary = self.root.join(format!(
@@ -1383,6 +1384,132 @@ fn statusline_session_id(observation: &Value) -> Option<&str> {
         .or_else(|| observation.get("conversation_id"))
         .or_else(|| observation.get("conversationId"))
         .and_then(Value::as_str)
+}
+
+pub fn sanitize_statusline_payload(value: &Value) -> Value {
+    let Some(source) = value.as_object() else {
+        return Value::Object(serde_json::Map::new());
+    };
+    let mut clean = serde_json::Map::new();
+
+    // 1. Session and conversation IDs
+    for key in &["session_id", "sessionId", "conversation_id", "conversationId"] {
+        if let Some(val) = source.get(*key).and_then(Value::as_str) {
+            clean.insert((*key).to_string(), Value::String(val.to_string()));
+        }
+    }
+
+    // 2. Model
+    if let Some(model_val) = source.get("model") {
+        if let Some(model_str) = model_val.as_str() {
+            clean.insert("model".to_string(), Value::String(model_str.to_string()));
+        } else if let Some(model_obj) = model_val.as_object() {
+            let mut clean_model = serde_json::Map::new();
+            for key in &["display_name", "displayName", "id", "name"] {
+                if let Some(val) = model_obj.get(*key).and_then(Value::as_str) {
+                    clean_model.insert((*key).to_string(), Value::String(val.to_string()));
+                }
+            }
+            if !clean_model.is_empty() {
+                clean.insert("model".to_string(), Value::Object(clean_model));
+            }
+        }
+    }
+
+    // 3. Quota
+    if let Some(quota_obj) = source.get("quota").and_then(Value::as_object) {
+        let mut clean_quota = serde_json::Map::new();
+        let allowed_buckets = [
+            "gemini-5h", "gemini-weekly", "3p-5h", "3p-weekly",
+            "primary", "secondary",
+        ];
+        let allowed_fields = [
+            "remaining_fraction", "remainingFraction",
+            "remaining_percent", "remainingPercentage",
+            "reset_time", "resetTime",
+            "reset_in_seconds", "resetInSeconds",
+        ];
+        for bucket in &allowed_buckets {
+            if let Some(bucket_obj) = quota_obj.get(*bucket).and_then(Value::as_object) {
+                let mut clean_bucket = serde_json::Map::new();
+                for field in &allowed_fields {
+                    if let Some(val) = bucket_obj.get(*field) {
+                        if val.is_number() || val.is_string() {
+                            clean_bucket.insert((*field).to_string(), val.clone());
+                        }
+                    }
+                }
+                if !clean_bucket.is_empty() {
+                    clean_quota.insert((*bucket).to_string(), Value::Object(clean_bucket));
+                }
+            }
+        }
+        if !clean_quota.is_empty() {
+            clean.insert("quota".to_string(), Value::Object(clean_quota));
+        }
+    }
+
+    // 4. Context window
+    let context_key = if source.contains_key("context_window") {
+        Some("context_window")
+    } else if source.contains_key("contextWindow") {
+        Some("contextWindow")
+    } else {
+        None
+    };
+    if let Some(ck) = context_key {
+        if let Some(context_obj) = source.get(ck).and_then(Value::as_object) {
+            let mut clean_context = serde_json::Map::new();
+            for field in &["used_percentage", "usedPercentage", "used_percent", "usedPercent"] {
+                if let Some(val) = context_obj.get(*field).and_then(Value::as_f64) {
+                    clean_context.insert((*field).to_string(), serde_json::json!(val));
+                }
+            }
+            let usage_key = if context_obj.contains_key("current_usage") {
+                Some("current_usage")
+            } else if context_obj.contains_key("currentUsage") {
+                Some("currentUsage")
+            } else {
+                None
+            };
+            if let Some(uk) = usage_key {
+                if let Some(usage_obj) = context_obj.get(uk).and_then(Value::as_object) {
+                    let mut clean_usage = serde_json::Map::new();
+                    for field in &[
+                        "input_tokens", "inputTokens",
+                        "output_tokens", "outputTokens",
+                        "cached_input_tokens", "cachedInputTokens",
+                        "cache_read_input_tokens", "cacheReadInputTokens",
+                        "cache_creation_input_tokens", "cacheCreationInputTokens",
+                    ] {
+                        if let Some(val) = usage_obj.get(*field).and_then(Value::as_u64) {
+                            clean_usage.insert((*field).to_string(), Value::Number(val.into()));
+                        }
+                    }
+                    if !clean_usage.is_empty() {
+                        clean_context.insert(uk.to_string(), Value::Object(clean_usage));
+                    }
+                }
+            }
+            if !clean_context.is_empty() {
+                clean.insert(ck.to_string(), Value::Object(clean_context));
+            }
+        }
+    }
+
+    // 5. Transcript path
+    if let Some(path) = source.get("transcript_path").and_then(Value::as_str) {
+        clean.insert("transcript_path".to_string(), Value::String(path.to_string()));
+    }
+
+    // 6. Prompt cache (legacy compatibility)
+    for pk in &["prompt_cache", "promptCache"] {
+        if let Some(pc_obj) = source.get(*pk).and_then(Value::as_object) {
+            clean.insert((*pk).to_string(), Value::Object(pc_obj.clone()));
+        }
+    }
+
+    Value::Object(clean)
 }
 
 fn merge_preserved_context(
@@ -3145,5 +3272,48 @@ mod tests {
         assert_eq!(cache.row_gap(), Some(SidebarRowGap::FLUSH));
         cache.clear_row_gap().unwrap();
         assert_eq!(cache.row_gap(), None);
+    }
+
+    #[test]
+    fn save_statusline_observation_sanitizes_disk_payload() {
+        let directory = tempdir().unwrap();
+        let cache = CacheStore::new(directory.path());
+        let snapshot = ProviderSnapshot::new(Provider::Agy, vec![], 1);
+        let sensitive = json!({
+            "session_id": "session-clean",
+            "user_prompt": "classified source code",
+            "history": ["turn 1", "turn 2"],
+            "bearer_token": "token-xyz",
+            "model": {"display_name": "Gemini 2.5 Flash"},
+            "quota": {
+                "gemini-5h": {"remaining_fraction": 0.9, "reset_in_seconds": 1800},
+                "leak_bucket": {"leak": true}
+            },
+            "context_window": {
+                "used_percentage": 10.0,
+                "secret_debug": "strip-me"
+            }
+        });
+
+        cache
+            .save_statusline_observation(Provider::Agy, snapshot, &sensitive)
+            .unwrap();
+
+        let loaded = cache
+            .load_statusline_observation(Provider::Agy)
+            .unwrap()
+            .expect("should load observation");
+
+        let payload = loaded.payload;
+        assert_eq!(payload.get("session_id").and_then(Value::as_str), Some("session-clean"));
+        assert!(payload.get("user_prompt").is_none());
+        assert!(payload.get("history").is_none());
+        assert!(payload.get("bearer_token").is_none());
+        assert!(payload.get("quota").and_then(|q| q.get("leak_bucket")).is_none());
+        assert!(payload.get("context_window").and_then(|c| c.get("secret_debug")).is_none());
+        assert_eq!(
+            payload.get("model").and_then(|m| m.get("display_name")).and_then(Value::as_str),
+            Some("Gemini 2.5 Flash")
+        );
     }
 }

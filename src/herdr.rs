@@ -513,15 +513,7 @@ pub fn find_agent_icon_panes(pane_ids: &[&str]) -> Result<Vec<AgentPane>> {
 }
 
 fn attach_missing_sessions(panes: &mut [AgentPane]) {
-    attach_muse_sessions(panes);
     attach_codex_sessions(panes);
-}
-
-/// Herdr has no Muse session integration, so a Muse pane arrives without a
-/// session. Resolve it from Muse's own session lock; a session Herdr does
-/// report is always kept as-is.
-fn attach_muse_sessions(panes: &mut [AgentPane]) {
-    attach_muse_sessions_with(panes, crate::providers::muse::session_ids_for_panes);
 }
 
 /// Codex hooks normally report a session id. A wrapper can disable those
@@ -721,31 +713,7 @@ fn parse_ps_elapsed(value: &str) -> Option<u64> {
     (clock.split(':').count() >= 2).then_some(days * 86_400 + seconds)
 }
 
-fn attach_muse_sessions_with(
-    panes: &mut [AgentPane],
-    resolve: impl FnOnce(&[String]) -> BTreeMap<String, String>,
-) {
-    let missing = panes
-        .iter()
-        .filter(|pane| pane.harness == Harness::Muse && pane.session.is_none())
-        .map(|pane| pane.pane_id.clone())
-        .collect::<Vec<_>>();
-    if missing.is_empty() {
-        return;
-    }
-    let resolved = resolve(&missing);
-    for pane in panes {
-        if pane.harness != Harness::Muse || pane.session.is_some() {
-            continue;
-        }
-        if let Some(session_id) = resolved.get(&pane.pane_id) {
-            pane.session = Some(AgentSession {
-                kind: Some("id".to_string()),
-                value: session_id.clone(),
-            });
-        }
-    }
-}
+
 
 fn list_agent_value() -> Result<Value> {
     let executable = std::env::var_os("HERDR_BIN_PATH").unwrap_or_else(|| "herdr".into());
@@ -1711,10 +1679,7 @@ fn vendor_nesting(
 }
 
 pub(crate) fn shares_login_quota(harness: Harness) -> bool {
-    matches!(
-        harness,
-        Harness::Grok | Harness::Codex | Harness::Devin | Harness::OpenCode | Harness::Cursor
-    )
+    matches!(harness, Harness::Codex)
 }
 
 /// Same-Space same-vendor group. Grok is one login-scoped vendor: the
@@ -2435,10 +2400,8 @@ fn extract_topic(text: &str, harness: Harness) -> Option<String> {
 
 fn prompt_candidate(line: &str, harness: Harness) -> Option<&str> {
     let marker = match harness {
-        Harness::Claude if line.starts_with('❯') => '❯',
         Harness::Codex if line.starts_with('›') => '›',
-        Harness::Grok if line.starts_with('❯') => '❯',
-        Harness::Grok | Harness::Agy if line.starts_with('>') => '>',
+        Harness::Agy if line.starts_with('>') => '>',
         _ => return None,
     };
     Some(line.trim_start_matches(marker).trim())

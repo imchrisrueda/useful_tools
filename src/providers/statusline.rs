@@ -1,8 +1,8 @@
 use crate::model::{CacheTotals, CacheUsage, ContextUsage, ProviderSnapshot};
 use crate::providers::ProviderError;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
@@ -128,7 +128,11 @@ pub fn api_generation(value: &Value) -> Option<String> {
     let has_evidence = evidence
         .as_array()
         .is_some_and(|values| values.iter().any(|value| !value.is_null()));
-    has_evidence.then(|| format!("{:x}", Sha256::digest(evidence.to_string().as_bytes())))
+    has_evidence.then(|| {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        evidence.to_string().hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    })
 }
 
 /// Accumulate cache counters from the provider session transcript.
