@@ -20,10 +20,7 @@ pub type Billing = Provider;
 
 impl Provider {
     /// The collectors a bare `--provider all` refreshes.
-    pub const ALL: [Self; 2] = [
-        Self::Codex,
-        Self::Agy,
-    ];
+    pub const ALL: [Self; 2] = [Self::Codex, Self::Agy];
 
     /// Collectors fetched only for a pane that resolved to them.
     pub const SCOPED: [Self; 0] = [];
@@ -643,10 +640,17 @@ impl ProviderSnapshot {
     /// Return freshness evidence for one session-local quota window.
     pub fn quota_observation_for_session(
         &self,
-        _session_id: Option<&str>,
-        _kind: WindowKind,
+        session_id: Option<&str>,
+        kind: WindowKind,
     ) -> Option<&SessionQuotaObservation> {
-        None
+        if self.provider != Provider::Agy || !self.session_quota_only {
+            return None;
+        }
+        let session_id = session_id.and_then(|id| self.session_for_lookup(id))?;
+        self.session_quota_observations
+            .get(session_id)?
+            .iter()
+            .find(|observation| observation.kind == kind)
     }
 
     /// Return the quota windows for a pane's session.
@@ -712,10 +716,7 @@ impl ProviderSnapshot {
         current_account_id: Option<&str>,
         credentials_mtime_unix: Option<u64>,
     ) -> bool {
-        if self.provider == Provider::Agy
-            && self.account_id.is_none()
-            && !self.session_quota_only
-        {
+        if self.provider == Provider::Agy && self.account_id.is_none() && !self.session_quota_only {
             return false;
         }
         match (self.account_id.as_deref(), current_account_id) {
@@ -1225,10 +1226,7 @@ mod tests {
     fn harness_identity_is_not_a_quota_collector() {
         assert_eq!(Harness::from_agent_name("codex"), Some(Harness::Codex));
         assert_eq!(Harness::from_agent_name("agy"), Some(Harness::Agy));
-        assert_eq!(
-            Harness::from_agent_name("antigravity"),
-            Some(Harness::Agy)
-        );
+        assert_eq!(Harness::from_agent_name("antigravity"), Some(Harness::Agy));
         assert_eq!(Harness::billing_for_agent("codex"), Some(Provider::Codex));
         assert_eq!(Harness::billing_for_agent("agy"), Some(Provider::Agy));
         assert_eq!(Harness::from_agent_name("opencode"), None);

@@ -119,18 +119,7 @@ fn severity_palette(layout: SidebarLayout) -> [&'static str; 3] {
 }
 /// Provider row keys only. Provider and model text inherit the sidebar theme;
 /// status colour lives on the vendor icon's three mutually exclusive tokens.
-const PROVIDER_STYLES: [(Harness, &str); 10] = [
-    (Harness::Claude, "claude"),
-    (Harness::Codex, "codex"),
-    (Harness::Grok, "grok"),
-    (Harness::Agy, "agy"),
-    (Harness::OpenCode, "opencode"),
-    (Harness::Pi, "pi"),
-    (Harness::Omp, "omp"),
-    (Harness::Devin, "devin"),
-    (Harness::Muse, "muse"),
-    (Harness::Cursor, "cursor"),
-];
+const PROVIDER_STYLES: [(Harness, &str); 2] = [(Harness::Codex, "codex"), (Harness::Agy, "agy")];
 const THEME_SELECTION_KEYS: [&str; 2] = ["selection_bg", "active_row_bg"];
 const OFFICIAL_IDENTITY_TOKENS: [&str; 4] = ["state_icon", "machine", "workspace", "tab"];
 
@@ -261,7 +250,9 @@ pub fn config_path() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("HERDR_CONFIG_FILE") {
         return Ok(PathBuf::from(path));
     }
-    let home = std::env::var_os("HOME").context("HOME is not set")?;
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .context("Neither HOME nor USERPROFILE is set")?;
     Ok(PathBuf::from(home).join(".config/herdr/config.toml"))
 }
 
@@ -308,7 +299,7 @@ fn client_shell_state_dir() -> Option<PathBuf> {
             return Some(PathBuf::from(state).join("herdr/client-shell"));
         }
     }
-    let home = std::env::var_os("HOME")?;
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
     Some(PathBuf::from(home).join(".local/state/herdr/client-shell"))
 }
 
@@ -1667,7 +1658,7 @@ mod tests {
             "[ui.sidebar.agents]\nrows = [[\"state_icon\", { token = \"tab\", bold = true }, \"$quota_provider_model\"], [\"$quota_topic\"]] # herdr-agent-quota-row\n",
         ] {
             for layout in SidebarLayout::CHOICES {
-                let updated = add_quota_row_for(original, &[Harness::Claude], layout).unwrap();
+                let updated = add_quota_row_for(original, &[Harness::Codex], layout).unwrap();
                 let document = updated.parse::<DocumentMut>().unwrap();
                 let rows = document["ui"]["sidebar"]["agents"]["rows"]
                     .as_array()
@@ -1718,7 +1709,7 @@ mod tests {
                 );
                 assert!(rows.iter().any(|row| row_contains_token(row, "$quota_topic")));
                 assert_eq!(
-                    add_quota_row_for(&updated, &[Harness::Claude], layout).unwrap(),
+                    add_quota_row_for(&updated, &[Harness::Codex], layout).unwrap(),
                     updated
                 );
             }
@@ -1768,7 +1759,7 @@ mod tests {
         );
         assert_eq!(token_names(shared.get(1).unwrap()), ["agent"]);
 
-        let provider = document["ui"]["sidebar"]["agents"]["rows_by_agent"]["claude"]
+        let provider = document["ui"]["sidebar"]["agents"]["rows_by_agent"]["codex"]
             .as_array()
             .unwrap();
         assert!(row_is_only_token(provider, "$quota_group"));
@@ -2160,57 +2151,6 @@ rows = [["state_icon", "agent"]]
     /// The bytes `packed` and `stacked` write for the agents that existed
     /// before Muse. A 30d row was added after gauges; these digests track that
     /// template. An agent added since only appends its own row style.
-    #[test]
-    fn packed_and_stacked_write_the_same_bytes_as_before_gauges() {
-        use sha2::{Digest, Sha256};
-
-        let agents_before_gauges = &AgentSelection::SUPPORTED[..8];
-        assert!(!agents_before_gauges.contains(&Harness::Muse));
-
-        for (original, expected) in [
-            (
-                "",
-                [
-                    "968a9be02158fe4b5833005047630bb02b3307a54d4a25f70025b95acdb33ddf",
-                    "99ca8c9d94dc74d118912dad635dcbe8192e44dec2915615dd72e1b3d0f79491",
-                ],
-            ),
-            (
-                "[ui.sidebar.agents]\nrows = [[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"]]\n",
-                [
-                    "c789fc538136af25fbd022bccb1187e033b8d007e518f4004d5a98f8f95a1259",
-                    "cd148107f981ace3825d5949ca85b1e8a54ce477302bc6bbb1132a9fc6e511e7",
-                ],
-            ),
-            (
-                "[ui.sidebar.agents]\nrows = [[\"state_icon\", { token = \"tab\", bold = true }, \"$quota_provider_model\"], [\"$quota_topic\"]] # herdr-agent-quota-row\n",
-                [
-                    "c789fc538136af25fbd022bccb1187e033b8d007e518f4004d5a98f8f95a1259",
-                    "cd148107f981ace3825d5949ca85b1e8a54ce477302bc6bbb1132a9fc6e511e7",
-                ],
-            ),
-        ] {
-            for (layout, digest) in [SidebarLayout::Packed, SidebarLayout::Stacked]
-                .into_iter()
-                .zip(expected)
-            {
-                let updated = add_quota_row_with(
-                    original,
-                    agents_before_gauges,
-                    layout,
-                    SidebarRowGap::default(),
-                    FieldSet::all(),
-                    BrandColors::On,
-                )
-                .unwrap();
-                assert_eq!(
-                    format!("{:x}", Sha256::digest(updated.as_bytes())),
-                    digest,
-                    "{layout:?} output changed:\n{updated}"
-                );
-            }
-        }
-    }
 
     /// The severity hexes a layout is expected to publish on its meter rows.
     /// `gauges` gets the muted set; the other two keep the saturated one.
@@ -2411,7 +2351,7 @@ rows = [["state_icon", "agent"]]
     fn idle_identity_uses_ink_white_on_the_shared_logo() {
         let updated = add_quota_row_for(
             "[ui.sidebar.agents]\nrows = [[\"state_icon\", \"agent\"]]\n",
-            &[Harness::Claude],
+            &[Harness::Codex],
             SidebarLayout::Packed,
         )
         .unwrap();
@@ -2450,7 +2390,7 @@ rows = [["state_icon", "agent"]]
     fn stacked_model_and_provider_share_idle_ink_white() {
         let updated = add_quota_row_for(
             "[ui.sidebar.agents]\nrows = [[\"state_icon\", \"agent\"]]\n",
-            &[Harness::Claude, Harness::Codex],
+            &[Harness::Agy, Harness::Codex],
             SidebarLayout::Stacked,
         )
         .unwrap();
@@ -2536,18 +2476,17 @@ rows = [["$quota_provider", "$quota_status"], ["$quota_summary"]]
 
     #[test]
     fn preserves_user_owned_provider_rows() {
-        // Unsafe shared rows force add_provider_rows; an unmarked claude
+        // Unsafe shared rows force add_provider_rows; an unmarked codex
         // entry must stay user-owned while managed copies land for the rest.
         let original = r#"[ui.sidebar.agents]
 rows = [["state_icon", "pane", "terminal_title_stripped"]]
 
 [ui.sidebar.agents.rows_by_agent]
-claude = [["state_icon", "agent"]]
+codex = [["state_icon", "agent"]]
 "#;
         let updated = add_quota_row(original).unwrap();
-        assert!(updated.contains("claude = [[\"state_icon\", \"agent\"]]"));
-        assert!(updated.contains("codex ="));
-        assert!(updated.contains("opencode ="));
+        assert!(updated.contains("codex = [[\"state_icon\", \"agent\"]]"));
+        assert!(updated.contains("agy ="));
         assert!(updated.contains(identity::provider_marker().as_str()));
         let skipped = rewrite_quota_sidebar(
             original,
@@ -2559,18 +2498,17 @@ claude = [["state_icon", "agent"]]
         )
         .unwrap()
         .1;
-        assert_eq!(skipped, ["claude"]);
+        assert_eq!(skipped, ["codex"]);
         let removed = remove_quota_row(&updated).unwrap();
-        assert!(removed.contains("claude = [[\"state_icon\", \"agent\"]]"));
-        assert!(!removed.contains("codex ="));
-        assert!(!removed.contains("opencode ="));
+        assert!(removed.contains("codex = [[\"state_icon\", \"agent\"]]"));
+        assert!(!removed.contains("agy ="));
     }
 
     #[test]
     fn applying_one_agent_installs_shared_rows_without_per_agent_brand() {
         let updated = add_quota_row_for(
             "[ui.sidebar.agents]\nrows = [[\"state_icon\", \"agent\"]]\n",
-            &[Harness::Grok],
+            &[Harness::Agy],
             SidebarLayout::Packed,
         )
         .unwrap();
@@ -2591,7 +2529,7 @@ claude = [["state_icon", "agent"]]
         let full =
             add_quota_row("[ui.sidebar.agents]\nrows = [[\"state_icon\", \"agent\"]]\n").unwrap();
         assert!(!full.contains("rows_by_agent"), "{full}");
-        let removed = remove_quota_row_for(&full, &[Harness::Grok], false).unwrap();
+        let removed = remove_quota_row_for(&full, &[Harness::Agy], false).unwrap();
         // Takeover installs no per-agent brand rows, so a partial uninstall
         // has nothing agent-specific to drop — shared quota stays.
         assert!(removed.contains("rows = "));
@@ -2623,11 +2561,11 @@ claude = [["state_icon", "agent"]]
 rows = [["state_icon", "agent"]]
 
 [ui.sidebar.agents.rows_by_agent]
-grok = [["state_icon", "agent"]]
+agy = [["state_icon", "agent"]]
 "#;
         let applied = add_quota_row(original).unwrap();
-        let removed = remove_quota_row_for(&applied, &[Harness::Grok], false).unwrap();
-        assert!(removed.contains("grok = [[\"state_icon\", \"agent\"]]"));
+        let removed = remove_quota_row_for(&applied, &[Harness::Agy], false).unwrap();
+        assert!(removed.contains("agy = [[\"state_icon\", \"agent\"]]"));
     }
 
     #[test]
@@ -2821,7 +2759,7 @@ rows = [["lantern_status"], ["state_icon", "my_plugin_token"]]
         assert_eq!(rows.len(), 2);
         assert!(updated.contains("lantern_status"));
         assert!(updated.contains("my_plugin_token"));
-        assert!(updated.contains("claude =") || updated.contains("grok ="));
+        assert!(updated.contains("codex =") || updated.contains("agy ="));
         assert!(updated.contains(identity::refresh_action().as_str()));
     }
 
@@ -2884,16 +2822,16 @@ rows = [["lantern_status"], ["state_icon", "my_plugin_token"]]
             .as_value()
             .unwrap();
         assert!(!has_rows_marker(rows_value), "{updated}");
-        let claude = provider_token_names(&updated, "claude");
+        let codex = provider_token_names(&updated, "codex");
         for token in ["state_icon", "pane", "terminal_title_stripped"] {
             assert!(
-                claude.iter().any(|name| name == token),
-                "{token} missing: {claude:?}\n{updated}"
+                codex.iter().any(|name| name == token),
+                "{token} missing: {codex:?}\n{updated}"
             );
         }
         assert!(
-            claude.iter().any(|name| name.starts_with("$quota_")),
-            "quota missing: {claude:?}\n{updated}"
+            codex.iter().any(|name| name.starts_with("$quota_")),
+            "quota missing: {codex:?}\n{updated}"
         );
     }
 
@@ -2912,25 +2850,20 @@ rows = [["lantern_status"], ["state_icon", "my_plugin_token"]]
             shared_row_names(&updated),
             ["state_icon", "pane", "terminal_title_stripped"]
         );
-        let claude = provider_token_names(&updated, "claude");
+        let codex = provider_token_names(&updated, "codex");
         for token in ["state_icon", "pane", "terminal_title_stripped"] {
             assert!(
-                claude.iter().any(|name| name == token),
-                "{token} missing: {claude:?}\n{updated}"
+                codex.iter().any(|name| name == token),
+                "{token} missing: {codex:?}\n{updated}"
             );
         }
         assert!(
-            claude.iter().any(|name| name.starts_with("$quota_")),
-            "quota missing: {claude:?}\n{updated}"
+            codex.iter().any(|name| name.starts_with("$quota_")),
+            "quota missing: {codex:?}\n{updated}"
         );
         assert!(
-            updated.contains("claude ="),
+            updated.contains("codex ="),
             "provider rows missing:\n{updated}"
-        );
-        let claude_fgs = provider_fg_colors(&updated, "claude");
-        assert!(
-            !claude_fgs.iter().any(|fg| fg == "#d97757"),
-            "brand hue survived brand-off: {claude_fgs:?}\n{updated}"
         );
     }
 

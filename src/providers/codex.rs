@@ -5,21 +5,12 @@ use crate::model::{
 };
 use crate::providers::ProviderError;
 use anyhow::{Context, Result};
-use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
 
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
-
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const FIVE_HOUR_WINDOW_MINUTES: u64 = 5 * 60;
 const WEEKLY_WINDOW_MINUTES: u64 = 7 * 24 * 60;
 const ROLLOUT_TAIL_BYTES: u64 = 256 * 1024;
@@ -161,7 +152,11 @@ fn parse_reset(value: &Value) -> Option<ResetAt> {
 /// behind the bounded `thread/list` page.
 pub fn fetch_for_sessions(session_ids: &[String]) -> Result<ProviderSnapshot> {
     let home = codex_home()?;
-    Ok(local_snapshot_at(&home, session_ids, CacheStore::now_unix()))
+    Ok(local_snapshot_at(
+        &home,
+        session_ids,
+        CacheStore::now_unix(),
+    ))
 }
 
 pub fn local_snapshot_at(home: &Path, session_ids: &[String], now_unix: u64) -> ProviderSnapshot {
@@ -169,72 +164,6 @@ pub fn local_snapshot_at(home: &Path, session_ids: &[String], now_unix: u64) -> 
     snapshot.source = "codex-rollout".to_string();
     enrich_local_sessions_at(&mut snapshot, home, session_ids);
     snapshot
-}
-
-/// Herdr runs hooks, actions, and the watcher with its server's PATH, which
-/// on macOS can be launchd's `/usr/bin:/bin:/usr/sbin:/sbin`. A bare `codex`
-/// then never starts, every fetch keeps the cached snapshot, and pane models
-/// stop following new sessions. Fall back to the usual install directories,
-/// and put the chosen one on the child's PATH so an npm `env node` shim finds
-/// the `node` installed beside it.
-fn codex_command() -> Command {
-    let path = std::env::var_os("PATH");
-    let fallbacks = std::env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join(".local/bin"))
-        .into_iter()
-        .chain(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from))
-        .collect::<Vec<_>>();
-    let (executable, directory) = resolve_codex_executable(
-        std::env::var_os("CODEX_BIN_PATH"),
-        path.as_deref(),
-        &fallbacks,
-    );
-    let mut command = Command::new(executable);
-    if let Some(directory) = directory {
-        let paths = std::iter::once(directory)
-            .chain(path.iter().flat_map(std::env::split_paths))
-            .collect::<Vec<_>>();
-        if let Ok(joined) = std::env::join_paths(paths) {
-            command.env("PATH", joined);
-        }
-    }
-    command
-}
-
-fn resolve_codex_executable(
-    configured: Option<std::ffi::OsString>,
-    path: Option<&std::ffi::OsStr>,
-    fallbacks: &[PathBuf],
-) -> (std::ffi::OsString, Option<PathBuf>) {
-    if let Some(configured) = configured {
-        // An npm-style shim starts with `#!/usr/bin/env node`, so the script
-        // resolves `node` through its own PATH. Herdr's server PATH omits
-        // Homebrew, and `codex_command` already prepends the install directory
-        // in the auto-discovery case. Mirror that here when the override names
-        // a file with a parent directory. A bare name like `codex` is resolved
-        // against the existing PATH, so there is no directory to prepend.
-        let directory = PathBuf::from(&configured)
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .map(PathBuf::from);
-        return (configured, directory);
-    }
-    let on_path = path
-        .into_iter()
-        .flat_map(std::env::split_paths)
-        .any(|directory| directory.join("codex").is_file());
-    if !on_path {
-        if let Some(directory) = fallbacks
-            .iter()
-            .find(|directory| directory.join("codex").is_file())
-        {
-            return (
-                directory.join("codex").into_os_string(),
-                Some(directory.clone()),
-            );
-        }
-    }
-    ("codex".into(), None)
 }
 
 const PROCESS_SESSION_START_TOLERANCE_SECONDS: u64 = 90;
@@ -380,113 +309,6 @@ fn first_rollout_line(reader: impl Read) -> Option<String> {
     (bytes.len() <= ROLLOUT_META_LINE_BYTES as usize).then(|| String::from_utf8(bytes).ok())?
 }
 
-/// Kill the app-server's process group and reap it, at most once.
-///
-/// Whichever of the request thread and the watchdog gets here first takes the
-/// child; the other one finds an empty slot and does nothing.
-fn terminate(child: &Mutex<Option<Child>>) {
-    let Ok(mut slot) = child.lock() else {
-        return;
-    };
-    let Some(mut child) = slot.take() else {
-        return;
-    };
-    // `pre_exec` put the app-server in its own process group, so this also
-    // collects any helper it spawned.
-    #[cfg(unix)]
-    unsafe {
-        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-fn fetch_from_process(
-    input: &mut ChildStdin,
-    output: &mut BufReader<impl std::io::Read>,
-    requested_session_ids: &[String],
-) -> Result<ProviderSnapshot> {
-    write_rpc(
-        input,
-        1,
-        "initialize",
-        serde_json::json!({
-            "clientInfo": {"name": crate::identity::PLUGIN_ID, "version": env!("CARGO_PKG_VERSION")},
-            "capabilities": {}
-        }),
-    )?;
-    let _ = read_rpc(output, 1)?;
-    write_notification(input, "initialized", serde_json::json!({}))?;
-
-    write_rpc(input, 2, "account/read", serde_json::json!({}))?;
-    let account = read_rpc(output, 2)?;
-    if !account_is_chatgpt(&account) {
-        anyhow::bail!(ProviderError::Unavailable(
-            "Codex is using API-key auth, not a ChatGPT subscription".to_string()
-        ));
-    }
-
-    write_rpc(input, 3, "account/rateLimits/read", serde_json::json!({}))?;
-    let limits = read_rpc(output, 3)?;
-    let mut snapshot =
-        parse_rate_limits(&limits, CacheStore::now_unix()).map_err(anyhow::Error::from)?;
-    snapshot.account_id = current_account_id().or_else(|| account_id_from_rpc(&account));
-
-    // Session previews come from Codex's local state database. This is one
-    // bounded read in the same app-server process as the quota request; it
-    // does not resume threads, scan rollout JSONL, or contact the model.
-    write_rpc(
-        input,
-        4,
-        "thread/list",
-        serde_json::json!({
-            "limit": 50,
-            "sortKey": "updated_at",
-            "useStateDbOnly": true
-        }),
-    )?;
-    let mut session_ids = requested_session_ids.to_vec();
-    if let Ok(threads) = read_rpc(output, 4) {
-        snapshot.session_summaries = parse_session_summaries(&threads);
-        for session_id in parse_thread_ids(&threads) {
-            if !session_ids.contains(&session_id) {
-                session_ids.push(session_id);
-            }
-        }
-    }
-    enrich_local_sessions(&mut snapshot, &session_ids);
-    Ok(snapshot)
-}
-
-fn parse_thread_ids(value: &Value) -> Vec<String> {
-    let result = value.get("result").unwrap_or(value);
-    result
-        .get("data")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|thread| {
-            thread
-                .get("id")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-                .map(str::to_string)
-        })
-        .collect()
-}
-
-/// Supplement quota data with bounded, local-only reads from the rollout
-/// belonging to each thread returned by `thread/list`. The app-server request
-/// above does not expose live token usage, while the rollout tail does. We
-/// never resume a thread, read prompt text into memory, or scan every pane's
-/// output; only the matching JSONL filenames are opened.
-fn enrich_local_sessions(snapshot: &mut ProviderSnapshot, session_ids: &[String]) {
-    let Some(home) = codex_home().ok() else {
-        return;
-    };
-    enrich_local_sessions_at(snapshot, &home, session_ids);
-}
-
 fn enrich_local_sessions_at(snapshot: &mut ProviderSnapshot, home: &Path, session_ids: &[String]) {
     if session_ids.is_empty() {
         return;
@@ -561,9 +383,9 @@ fn find_rollout_paths(home: &Path, session_ids: &[String]) -> BTreeMap<String, P
             let name = name.to_string_lossy();
             let clean = name.strip_suffix(".zst").unwrap_or(&name);
             let stem = clean.strip_suffix(".jsonl").unwrap_or(clean);
-            let matching_ids = session_ids
-                .iter()
-                .filter(|session_id| stem.ends_with(&format!("-{session_id}")) || stem == session_id.as_str());
+            let matching_ids = session_ids.iter().filter(|session_id| {
+                stem.ends_with(&format!("-{session_id}")) || stem == session_id.as_str()
+            });
             let modified = entry
                 .metadata()
                 .ok()
@@ -591,7 +413,6 @@ struct RolloutObservation {
     model: Option<String>,
     context: Option<ContextUsage>,
     windows: Vec<UsageWindow>,
-    last_timestamp: Option<u64>,
 }
 
 fn is_rollout_file(name: &str) -> bool {
@@ -659,7 +480,10 @@ fn read_rollout_observation(path: &Path, session_id: &str) -> Option<RolloutObse
         // file head: that is the first turn's model, not the current one.
         observation.model = read_latest_rollout_model(path);
     }
-    if observation.model.is_none() && observation.context.is_none() && observation.windows.is_empty() {
+    if observation.model.is_none()
+        && observation.context.is_none()
+        && observation.windows.is_empty()
+    {
         return None;
     }
     Some(observation)
@@ -724,14 +548,10 @@ fn parse_rollout_observation(text: &str, session_id: &str) -> Option<RolloutObse
     let mut model = None;
     let mut context = None;
     let mut windows = Vec::new();
-    let mut last_timestamp = None;
     for line in text.lines() {
         let Ok(entry) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        if let Some(ts) = parse_rollout_timestamp(&entry) {
-            last_timestamp = Some(ts);
-        }
         if entry.get("type").and_then(Value::as_str) == Some("turn_context") {
             let payload = entry.get("payload").unwrap_or(&entry);
             model = parse_model_payload(payload).or(model);
@@ -806,7 +626,6 @@ fn parse_rollout_observation(text: &str, session_id: &str) -> Option<RolloutObse
         model,
         context,
         windows,
-        last_timestamp,
     })
 }
 
@@ -866,88 +685,6 @@ fn token_count(object: &serde_json::Map<String, Value>, snake: &str, camel: &str
         .unwrap_or_default()
 }
 
-fn parse_session_summaries(value: &Value) -> BTreeMap<String, String> {
-    let result = value.get("result").unwrap_or(value);
-    result
-        .get("data")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|thread| {
-            let id = thread.get("id").and_then(Value::as_str)?;
-            let preview = thread.get("preview").and_then(Value::as_str)?;
-            let summary = preview
-                .lines()
-                .map(str::trim)
-                .find(|line| !line.is_empty())
-                .filter(|line| !line.eq_ignore_ascii_case("ask codex to do anything"))
-                .map(truncate_summary)?;
-            Some((id.to_string(), summary))
-        })
-        .collect()
-}
-
-fn truncate_summary(value: &str) -> String {
-    let characters: Vec<char> = value.chars().collect();
-    if characters.len() <= 80 {
-        return value.to_string();
-    }
-    let mut summary: String = characters.into_iter().take(77).collect();
-    summary.push('…');
-    summary
-}
-
-fn write_rpc(input: &mut ChildStdin, id: u64, method: &str, params: Value) -> Result<()> {
-    let message = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": method,
-        "params": params
-    });
-    writeln!(input, "{}", serde_json::to_string(&message)?)?;
-    input.flush()?;
-    Ok(())
-}
-
-fn write_notification(input: &mut ChildStdin, method: &str, params: Value) -> Result<()> {
-    let message = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params
-    });
-    writeln!(input, "{}", serde_json::to_string(&message)?)?;
-    input.flush()?;
-    Ok(())
-}
-
-fn read_rpc(output: &mut BufReader<impl std::io::Read>, expected_id: u64) -> Result<Value> {
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let count = output.read_line(&mut line)?;
-        if count == 0 {
-            anyhow::bail!("Codex app-server exited before response {expected_id}");
-        }
-        let Ok(value) = serde_json::from_str::<Value>(line.trim()) else {
-            continue;
-        };
-        if value.get("id").and_then(Value::as_u64) != Some(expected_id) {
-            continue;
-        }
-        if let Some(error) = value.get("error") {
-            anyhow::bail!("Codex app-server request failed: {error}");
-        }
-        return Ok(value);
-    }
-}
-
-pub fn auth_path() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os("CODEX_AUTH_FILE") {
-        return Ok(PathBuf::from(path));
-    }
-    Ok(codex_home()?.join("auth.json"))
-}
-
 fn codex_home() -> Result<PathBuf> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -964,41 +701,6 @@ pub fn current_account_id() -> Option<String> {
 
 pub fn auth_mtime_unix() -> Option<u64> {
     None
-}
-
-pub fn account_id_from_auth(path: &Path) -> Option<String> {
-    #[derive(Deserialize)]
-    struct AuthMetadata {
-        tokens: Option<TokenMetadata>,
-    }
-
-    #[derive(Deserialize)]
-    struct TokenMetadata {
-        #[serde(default)]
-        account_id: Option<String>,
-        #[serde(default, alias = "chatgptAccountId")]
-        chatgpt_account_id: Option<String>,
-    }
-
-    // Only materialize the stable account id. Token fields are ignored by the
-    // streaming deserializer and never enter an owned Rust value.
-    let metadata: AuthMetadata =
-        serde_json::from_reader(BufReader::new(fs::File::open(path).ok()?)).ok()?;
-    let tokens = metadata.tokens?;
-    tokens
-        .account_id
-        .or(tokens.chatgpt_account_id)
-        .filter(|value| !value.is_empty())
-}
-
-fn account_id_from_rpc(value: &Value) -> Option<String> {
-    let result = value.get("result").unwrap_or(value);
-    let account = result.get("account").unwrap_or(result);
-    ["accountId", "account_id", "chatgptAccountId", "id"]
-        .iter()
-        .find_map(|key| account.get(*key).and_then(Value::as_str))
-        .filter(|value| !value.is_empty() && *value != "chatgpt")
-        .map(str::to_string)
 }
 
 pub fn account_is_chatgpt(value: &Value) -> bool {
@@ -1108,18 +810,6 @@ mod tests {
     }
 
     #[test]
-    fn reads_codex_account_id_from_local_auth_file() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("auth.json");
-        fs::write(
-            &path,
-            r#"{"auth_mode":"chatgpt","tokens":{"account_id":"acc-1","access_token":"secret"}}"#,
-        )
-        .unwrap();
-        assert_eq!(account_id_from_auth(&path).as_deref(), Some("acc-1"));
-    }
-
-    #[test]
     fn distinguishes_chatgpt_subscription_from_api_key() {
         assert!(account_is_chatgpt(
             &json!({"result": {"account": {"authMode": "chatgpt"}}})
@@ -1127,21 +817,6 @@ mod tests {
         assert!(!account_is_chatgpt(
             &json!({"result": {"account": {"authMode": "api_key"}}})
         ));
-    }
-
-    #[test]
-    fn extracts_compact_session_summaries_without_default_prompt() {
-        let summaries = parse_session_summaries(&json!({
-            "result": {"data": [
-                {"id": "thread-1", "preview": "A real task\n\nmore detail"},
-                {"id": "thread-2", "preview": "Ask Codex to do anything"}
-            ]}
-        }));
-        assert_eq!(
-            summaries.get("thread-1").map(String::as_str),
-            Some("A real task")
-        );
-        assert!(!summaries.contains_key("thread-2"));
     }
 
     #[test]
@@ -1361,71 +1036,6 @@ mod tests {
     }
 
     #[test]
-    fn a_herdr_server_path_without_codex_falls_back_to_an_install_directory() {
-        let directory = tempfile::tempdir().unwrap();
-        let system = directory.path().join("usr-bin");
-        let homebrew = directory.path().join("homebrew-bin");
-        fs::create_dir_all(&system).unwrap();
-        fs::create_dir_all(&homebrew).unwrap();
-        fs::write(homebrew.join("codex"), "").unwrap();
-        let fallbacks = [directory.path().join("absent"), homebrew.clone()];
-
-        let (executable, prepended) =
-            resolve_codex_executable(None, Some(system.as_os_str()), &fallbacks);
-        assert_eq!(executable, homebrew.join("codex").into_os_string());
-        assert_eq!(prepended, Some(homebrew.clone()));
-
-        // Codex already on PATH, or an explicit override, is used as given.
-        let (executable, prepended) =
-            resolve_codex_executable(None, Some(homebrew.as_os_str()), &fallbacks);
-        assert_eq!(executable, std::ffi::OsString::from("codex"));
-        assert_eq!(prepended, None);
-        let (executable, prepended) = resolve_codex_executable(
-            Some("/custom/codex".into()),
-            Some(system.as_os_str()),
-            &fallbacks,
-        );
-        assert_eq!(executable, std::ffi::OsString::from("/custom/codex"));
-        assert_eq!(prepended, Some(PathBuf::from("/custom")));
-    }
-
-    #[test]
-    fn an_explicit_codex_bin_path_prepends_its_directory_to_the_child_path() {
-        let directory = tempfile::tempdir().unwrap();
-        let shim_dir = directory.path().join("shims");
-        fs::create_dir_all(&shim_dir).unwrap();
-        fs::write(shim_dir.join("codex"), "").unwrap();
-        let configured = shim_dir.join("codex").into_os_string();
-
-        // $CODEX_BIN_PATH pointing at a shim: use the override as-is and
-        // prepend its directory so an `env node` shim resolves node under
-        // Herdr's minimal server PATH.
-        let (executable, prepended) = resolve_codex_executable(
-            Some(configured.clone()),
-            Some(directory.path().join("absent").as_os_str()),
-            &[],
-        );
-        assert_eq!(executable, configured);
-        assert_eq!(prepended, Some(shim_dir.clone()));
-
-        // A bare name without a directory component is resolved against the
-        // inherited PATH; there is no directory to prepend.
-        let (executable, prepended) = resolve_codex_executable(
-            Some(std::ffi::OsString::from("codex")),
-            Some(directory.path().join("absent").as_os_str()),
-            &[],
-        );
-        assert_eq!(executable, std::ffi::OsString::from("codex"));
-        assert_eq!(prepended, None);
-
-        // Unset: unchanged - no directory is prepended.
-        let (executable, prepended) =
-            resolve_codex_executable(None, Some(shim_dir.as_os_str()), &[]);
-        assert_eq!(executable, std::ffi::OsString::from("codex"));
-        assert_eq!(prepended, None);
-    }
-
-    #[test]
     fn two_rollouts_near_one_process_start_stay_unresolved() {
         let directory = tempfile::tempdir().unwrap();
         for (id, stamp, at) in [
@@ -1554,18 +1164,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn reads_codex_account_id_from_chatgpt_account_id_when_account_id_is_absent() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("auth.json");
-        fs::write(
-            &path,
-            r#"{"auth_mode":"chatgpt","tokens":{"chatgpt_account_id":"acc-2","access_token":"secret"}}"#,
-        )
-        .unwrap();
-        assert_eq!(account_id_from_auth(&path).as_deref(), Some("acc-2"));
-    }
-
     fn token_count_pad_line() -> String {
         serde_json::to_string(&json!({
             "type": "event_msg",
@@ -1670,7 +1268,7 @@ mod tests {
     fn set_modified(path: &Path, seconds: u64) {
         fs::File::open(path)
             .unwrap()
-            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(seconds))
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
             .unwrap();
     }
 
@@ -1856,10 +1454,7 @@ mod tests {
         assert!(snapshot.windows.is_empty());
         // Session windows must contain the extracted windows
         assert!(snapshot.session_windows.contains_key("session-rate-limits"));
-        let windows = snapshot
-            .session_windows
-            .get("session-rate-limits")
-            .unwrap();
+        let windows = snapshot.session_windows.get("session-rate-limits").unwrap();
         assert_eq!(windows.len(), 2);
         assert_eq!(
             snapshot
@@ -1870,4 +1465,3 @@ mod tests {
         );
     }
 }
-

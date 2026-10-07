@@ -1,6 +1,6 @@
 use crate::cache::CacheStore;
 use crate::model::{Provider, ProviderSnapshot, ResetAt, UsageWindow, WindowKind};
-use crate::providers::statusline::{parse_context, parse_model};
+use crate::providers::statusline::{enrich_prompt_cache, parse_context, parse_model};
 use crate::providers::ProviderError;
 use serde_json::Value;
 
@@ -144,6 +144,8 @@ pub fn parse_statusline(
         if let Some(context) = context.as_mut() {
             context.cache = None;
         }
+    } else {
+        enrich_prompt_cache(&mut context, value);
     }
 
     Ok(

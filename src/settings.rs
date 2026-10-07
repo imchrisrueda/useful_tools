@@ -705,9 +705,9 @@ mod tests {
         assert!(!draft.fields.contains(SidebarField::Cache));
         assert!(draft.fields.contains(SidebarField::Ttl));
 
-        draft.cycle(Row::Agent(Harness::Grok), 1);
-        assert!(!draft.has_agent(Harness::Grok));
-        assert!(draft.has_agent(Harness::Claude));
+        draft.cycle(Row::Agent(Harness::Agy), 1);
+        assert!(!draft.has_agent(Harness::Agy));
+        assert!(draft.has_agent(Harness::Codex));
     }
 
     /// Applying names every value, so it cannot inherit a stale preference,
@@ -719,14 +719,14 @@ mod tests {
         let mut draft = settings();
         draft.cycle(Row::Choice(Choice::Percent), 1);
         draft.cycle(Row::Field(SidebarField::Topic), 1);
-        draft.cycle(Row::Agent(Harness::Pi), 1);
+        draft.cycle(Row::Agent(Harness::Agy), 1);
         assert_eq!(
             draft.apply_arguments(),
             vec![
                 "configure",
                 "--apply",
                 "--agent",
-                "claude,codex,grok,agy,opencode,omp,devin,muse,cursor",
+                "codex",
                 "--quota-percent",
                 "used",
                 "--sidebar-pacing",
@@ -779,13 +779,10 @@ mod tests {
     #[test]
     fn turning_the_newest_agent_off_is_an_exact_cli_list() {
         let mut draft = settings();
-        draft.cycle(Row::Agent(Harness::Cursor), 1);
+        draft.cycle(Row::Agent(Harness::Agy), 1);
         let arguments = draft.apply_arguments();
         let agent = arguments.iter().position(|flag| flag == "--agent").unwrap();
-        assert_eq!(
-            arguments[agent + 1],
-            "claude,codex,grok,agy,opencode,pi,omp,devin,muse"
-        );
+        assert_eq!(arguments[agent + 1], "codex");
     }
 
     /// Turning every field off is a real choice, and `configure` accepts the
@@ -805,11 +802,11 @@ mod tests {
     fn removing_an_agent_needs_confirmation_and_uninstalls_that_agent() {
         let applied = settings();
         let mut draft = applied;
-        draft.cycle(Row::Agent(Harness::Claude), 1);
-        assert_eq!(draft.removed_agents(applied), vec![Harness::Claude]);
+        draft.cycle(Row::Agent(Harness::Agy), 1);
+        assert_eq!(draft.removed_agents(applied), vec![Harness::Agy]);
         assert_eq!(
             Settings::uninstall_arguments(&draft.removed_agents(applied)),
-            vec!["configure", "--uninstall", "--agent", "claude"]
+            vec!["configure", "--uninstall", "--agent", "agy"]
         );
 
         let mut current = applied;

@@ -54,7 +54,7 @@ Concretely, this means:
 |---|---|---|
 | `startup` | Herdr's `[[startup]]` hook | No |
 | `refresh` | manual action, `startup` | No |
-| `event` | `pane.agent_detected`, `pane.agent_status_changed` | Only the pane named in `HERDR_PLUGIN_EVENT_JSON`, and never a Pi, omp, Muse, or Cursor pane — their transcripts carry the evidence |
+| `event` | `pane.agent_detected`, `pane.agent_status_changed` | Only the pane named in `HERDR_PLUGIN_EVENT_JSON` |
 | `focus` | `pane.focused`, `workspace.focused`, `tab.focused` | No |
 | `watch` | detached from a working status event | No (agent metadata only) |
 
@@ -70,8 +70,7 @@ working→idle on completion). Anything `event` does, the user pays for twice
 every time they press Enter. Budget accordingly.
 
 The working event starts one global `watch` pulse. It calls `herdr agent list`
-once per configured interval for every supported harness, including Pi, OMP,
-OpenCode, Muse, and Cursor. Event-spawned watchers defer their first poll. They resolve local
+once per configured interval for every supported harness (Codex and Agy). Event-spawned watchers defer their first poll. They resolve local
 billing targets, refresh active/settling targets, and publish to siblings with
 the same target without reading terminal output. A finishing target stays in
 the pass until the 60-second debounce has elapsed. The interval defaults to
@@ -82,170 +81,24 @@ reconciles those changes without reading pane output or writing unchanged
 metadata. The watcher stays alive for unseen completions until they are seen.
 Local stop/connection checks interrupt sleeps. Uninstall writes a stop marker.
 
-## omp's quota does not come from a provider endpoint
+## Local-first metrics: Codex and Antigravity (Agy)
 
-Every other collector either reads a local credential and calls the provider
-(`codex`, `grok`, `opencode_go`, `devin`, `muse`, `cursor`) or waits for a
-statusLine hook (`claude`, `agy`). omp is the exception: it keeps its own credential store and
-ships its own usage layer, so `src/providers/omp.rs` shells out to
-`omp usage --json --provider <id>` and reads the answer.
+This plugin operates strictly local-first with zero credential storage and zero remote API requests:
 
-Three properties hold that together, and each one is load bearing:
+1. **Codex**: Quota windows (5h, 7d), token usage, context window, and model are parsed
+   directly and locally from rollout files (`.jsonl` and compressed `.jsonl.zst`) in
+   `~/.codex/sessions`. No `codex app-server` or background child processes are spawned.
+   Session attribution matches the pane's foreground cwd and process start time to rollout `session_meta`.
+2. **Antigravity (Agy)**: StatusLine IPC hook writes structured JSON payloads to a dedicated
+   mailbox file under the plugin state directory. Quota windows (`5h`, `7d`, and third-party `api` pools on Gemini),
+   model display name, context window percentages, and spending pace are extracted directly with zero external credentials.
 
-1. **One provider, never the pool.** The call always names the provider the
-   pane's transcript is talking to. Asking for everything would poll every
-   subscription the user has in omp, on a pane event.
-2. **Two caches, deliberately.** omp answers from its own five-minute usage
-   cache in `agent.db`; on top of that this plugin debounces to 60 seconds per
-   target and stores the sanitized report for all accounts returned by that one provider. Neither layer may be removed on
-   the theory that the other covers it — omp's cache is what stops a provider
-   request, ours is what stops a process spawn.
-3. **`agent.db` is never opened.** It holds live OAuth tokens. Everything
-   needed — the account identity and the quota — is in the CLI's output.
-   `models.db` is opened read-only, because the context window is the one thing
-   the CLI cannot give cheaply.
+## Quota attribution and cache rules
 
-An omp pane is billed in `CredentialScope::OMP_STORE`, not the canonical scope.
-An omp Claude pane and a Claude Code pane can be two different subscriptions,
-so they must never share a cache file; `BillingTarget::cache_identity` is what
-keeps them apart, and it is the reason that function appends a scope.
-
-Attribution is by omp's `credential_pin`: the transcript records
-`sha256(provider\0accountId\0email\0orgId\0projectId)` of the serving
-account, and `providers::omp::account_pin` recomputes it from the usage
-report's identity. That digest is omp's persisted contract — if it changes
-upstream, every pin is orphaned and multi-account panes silently fall back to
-"no quota". The pinned-digest test exists to make that a test failure rather
-than a wrong number.
-
-## Quota attribution and cache upgrades
-
-- Direct API snapshots carry an account ID or credential hash. Unstamped old
-  caches cannot prove a current login. A failed attempt is debounced by the
-  attempted identity; a different login can refresh immediately.
-- Codex rollouts provide diagnostics only. Fresh API windows replace old
-  windows, including ones an older plugin borrowed from a rollout.
-- Claude/Agy StatusLine has no reliable serving-account ID. New observations
-  carry `session_quota_only`; they never share windows by profile directory.
-  Rebuild old mailboxes from their raw payload, not merged profile windows.
-- Agy must identify the active pool or receive only one possible pool. Do not
-  combine Gemini and third-party quotas for an unknown model.
-- OMP stores all accounts in one sanitized provider report so a second pin
-  does not lose its quota during debounce. Select by pin; keep a failed
-  account's old reading only while the report still identifies that account.
-- Cursor stamps `sha256("cursor\0" || access token)`. Included is
-  `planUsage.totalPercentUsed` when present — the CLI usage panel's Included
-  row — and only then `includedSpend / limit`. The IDE `state.vscdb` mtime is
-  not a credential gate. On macOS without `$CURSOR_HOME` / `$CURSOR_AUTH_FILE`
-  / `$CURSOR_STATE_DB`, `auth_mtime_unix` is none — a `stat` of
-  `~/.cursor/auth.json` is enough for Ghostty TCC, and the Keychain approval
-  marker is not a login generation (`cursor-agent login` overwrites
-  `cursor-access-token` in place). Re-read that Keychain item; do not keep the
-  previous token in the watch process. On macOS, `cursor-agent login` stores
-  the token in Keychain, not `auth.json`; do not fall back to the IDE token
-  while the CLI still has `cli-config.json` `authInfo`.
-
-## Devin's per-session model is local SQLite, not the quota API
-
-`~/.local/share/devin/cli/sessions.db` is CLI session state. Open it
-read-only and select only `id, model` — the same discipline as omp
-`models.db`, not `agent.db`. A missing, locked, or unexpected schema skips
-per-session attribution. `config.json` `agent.model` stays on
-`snapshot.model` as the fallback and is never copied into `session_models`.
-
-## Muse panes are matched through Muse's session lock
-
-Herdr has no Muse session integration, so a Muse pane arrives without an
-`agent_session`. `herdr::list_agent_state` fills it in from evidence Muse
-writes itself: the `muse-bin` process inherits its pane's `HERDR_PANE_ID`, and
-`sessions/<yyyy>/<mm>/<dd>/<id>/.session.lock` holds that process's
-`pid=<n>`. Read only `comm` and the `HERDR_PANE_ID` entry of a process
-environment, never anything else from it. A session Herdr does report always
-wins. No `/proc` (macOS) means no session, never a guessed one.
-
-The quota call (`muse-code/key`) also returns the account's API key and
-identity. Only `subs_usage` is read. A `storage: "keychain"` login keeps the
-OAuth token out of `auth.json`; the collector then reads that one item through
-`security find-generic-password` (service `ai.meta.dev.credentials`, account
-`meta`). Background processes never prompt: without a recorded approval marker
-the keychain branch is skipped outright, and the user approves once via
-`refresh --provider muse --keychain-approve` (click **Always Allow**, not
-Allow). The marker lives beside the Muse config dir so every process — herdr
-hook, daemon, or plain terminal — resolves the same path. A successful token
-is kept in the watch process until the auth file's identity changes or
-`muse-code/key` returns 401/403; a failed lookup is not cached and does not
-clear the marker, so a transient failure retries on the next refresh. Only
-`access_token` is taken from the payload; file-storage logins are unchanged.
-No stored account
-login (an API-key login) or an inactive subscription yields a snapshot without
-windows, but only while a Muse session is refreshed, so its local fields still
-publish. A rejected token or failed request stays an error, which keeps the
-cached quota. Session-local fields come from the
-bounded tail of `session.jsonl`: the last `model_completed` usage against the
-`model-catalog` context limit, and the last prompt as topic: a main-surface
-chat `runtime.user_intent.accepted`, with `user_prompt_display` accepted too
-because Muse writes it only for some submits.
-Muse publishes no prompt-cache lifetime, so there is no TTL estimate.
-
-## Cursor's quota is DashboardService, not a browser cookie
-
-Cursor Agent CLI is a separate install from the desktop app. Herdr's kind and
-PATH command are `cursor` (alias `cursor-agent`). Never call a bare `agent` —
-that name is Grok's on machines that have both. Herdr has a session
-integration (`herdr integration install cursor`). Event does not read the
-pane: the generated session title (`meta.json` `title`, else `store.db`
-`name`) is the topic. Placeholder `New Agent` falls back to the last
-`<user_query>` in the session jsonl.
-
-Credentials, in order: `accessToken` in the CLI auth file (`$CURSOR_AUTH_FILE`,
-else `~/.cursor/auth.json` on macOS, else `$XDG_CONFIG_HOME/cursor/auth.json`);
-on macOS, Keychain item `cursor-access-token` / `cursor-user` (what
-`cursor-agent login` writes when `AGENT_CLI_CREDENTIAL_STORE` is default);
-then `cursorAuth/accessToken` in the desktop `state.vscdb` only when the CLI
-has no login of its own **and** `$CURSOR_STATE_DB` is set. On macOS, do not
-open `~/.cursor` or the default `~/Library/Application Support/Cursor/…/state.vscdb`
-from event/watch/refresh/hook: those trees are Cursor-provenance, this binary
-is ad-hoc, and TCC prompts Ghostty "would like to access data from other
-apps" on every process. File reads resume only with `$CURSOR_HOME` /
-`$CURSOR_AUTH_FILE` / `$CURSOR_STATE_DB`. Model/cache/context come from the
-hook mailbox; the Keychain approval marker lives in plugin state. Do not
-treat that marker as `auth_mtime_unix`, and do not process-cache the Keychain
-secret against it: a `stat` of `~/.cursor/auth.json` is Ghostty TCC, and a
-cached token keeps the previous account's quota while that token remains
-valid. Never copy the IDE database, never use its mtime as a gate, never read
-`refreshToken`, never send a `WorkosCursorSessionToken` cookie. Background
-processes never prompt for Keychain: without a recorded approval marker the
-keychain branch is skipped, and the user approves once via
-`refresh --provider cursor --keychain-approve` (click **Always Allow**, not
-Allow). The collector does not write, refresh, or exchange tokens; a 401
-re-reads the current files and Keychain once.
-
-Quota is `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`
-with `Connect-Protocol-Version: 1`, the same call the CLI makes. Included is
-`planUsage.totalPercentUsed` when present — the CLI usage panel's "Included"
-row — and only then `includedSpend / limit`. The three bars map onto at
-(`autoPercentUsed`, 5h), api (`apiPercentUsed`, 7d), and 30d (Included).
-`billingCycleEnd` is Unix milliseconds. Model is
-`cli-config.json` `model.displayName` — the CLI footer after a model switch.
-store.db meta `lastUsedModel` overrides that only when it names a specific
-model; `default` / `auto` keep the catalog, because Cursor does not rewrite
-the store field when you change models in an existing session (never the
-encrypted blobs). Turn token counts are not in the
-jsonl. Cache and context come from the interactive CLI's `afterAgentResponse`,
-`stop`, and `preCompact` hooks: token counts map the same way the CLI
-statusLine `current_usage` does (`fresh = input - cache_read - cache_write`);
-Context percent is `store.db` `token_details.used_tokens / max_tokens`, the
-same numbers the CLI footer prints (`Auto · 8.1%`). Only that protobuf field
-is read. Cache still comes from the hooks; `context_usage_percent` wins when
-present, otherwise last `input_tokens` against `context_window_size`,
-Composer 2.x's documented 200k window, or Auto/`default`'s 256k window.
-`configure` writes `herdr-agent-usage-hooks.sh` under plugin state — not
-next to `hooks.json`. `bash ~/.cursor/…` is a Ghostty-attributed open of
-Cursor-provenance files and prompts twice per turn (`afterAgentResponse`
-then `stop`). It never replaces Herdr's `sessionStart`. Cursor CLI loads user
-hooks at session start, so an already-running pane must be restarted. Do not
-install a Cursor `statusLine` — that setting replaces the native CLI footer. Cursor publishes no prompt-cache lifetime, so there is
-no TTL. Cache identity is `sha256("cursor\0" || token)`.
+- Codex rollouts provide local-only session windows and diagnostics without contacting external endpoints.
+- Agy StatusLine observations carry `session_quota_only`; they are never merged or shared across sessions.
+- Agy must identify the active pool or receive only one possible pool. Do not combine Gemini and third-party quotas for an unknown model.
+- Failed reads or missing data preserve the last verified observation; they never manufacture zero usage or guessed data.
 
 ## Herdr state this plugin owns outside a pane
 
@@ -275,8 +128,8 @@ one, and setting it replaces the user's own `ui.agent_panel_sort`. Rules:
    `workspace_order` ascending, then `quota_headroom` ascending — never a
    flat headroom list that scatters one project's panes across the panel.
    `$quota_group` names the Space on the tightest pane in that workspace;
-   `$quota_icon` is the vendor mark on every identity row (bundled icon font;
-   Muse uses a text glyph). Working/done colour is an invisible suffix matched
+   `$quota_icon` is the vendor mark on every identity row (bundled icon font).
+   Working/done colour is an invisible suffix matched
    by sidebar `rules`, not a later twin token — a later `$quota_icon_done`
    hang-indents one cell under the Space name. Colour replaces Herdr's `state_icon`
    ring: yellow while working, teal for an unseen completion, white after
@@ -323,7 +176,7 @@ So `src/prefs.rs` — small files under `HERDR_PLUGIN_CONFIG_DIR` — is the onl
 channel an installer has for passing a choice to `configure`. Environment
 variables still work for a **direct CLI run** and are read first, but anything
 that must survive `install.sh` / `uninstall.sh` has to be written as a
-preference. This bit once: `./uninstall.sh --agent grok` passed the selection
+preference. This bit once: `./uninstall.sh --agent codex` passed the selection
 through `env`, it never arrived, and the default selection is *every* agent, so
 a partial uninstall removed everything.
 
@@ -351,20 +204,10 @@ not part of a stable contract.
 ## Adding a harness
 
 Append to `AgentSelection::SUPPORTED`. Never insert. A saved complete agent
-list is a proper prefix of that array, and `parse_list` still reads an unmarked
-prefix of length ≥ 6 as every agent. That is what #81 was: Muse grew
-`SUPPORTED`, a settings-saved
-`claude,codex,grok,agy,opencode,pi,omp,devin` became "partial", `ensure_omp`
-took the hard-failure path, and `configure` aborted on a machine without omp.
-The first six entries are the first complete list the settings pane wrote; do
-not reorder them.
+list is a proper prefix of that array (`[Harness::Codex, Harness::Agy]`).
+Settings and `install.sh --agent` write `all` or `only,<names>`.
 
-You do not add a historical snapshot by hand when you append — the prefix
-rule covers the new tail. Settings and `install.sh --agent` write `all` or
-`only,<names>` so a later "everything except the newest one" is not mistaken
-for a legacy full list.
-
-Wiring the new name is not enough. Also:
+Wiring a new name requires:
 
 1. `Harness`, `from_agent_name`, `AgentSelection` (the enum, `parse`,
    `harness`, `harness_name`), clap `--agent` help, `install.sh` comments,
@@ -372,14 +215,10 @@ Wiring the new name is not enough. Also:
 2. A `PROVIDER_STYLES` row in `src/configure/herdr.rs`, in `SUPPORTED` order.
 3. Settings popup `height` in `herdr-plugin.toml` — one more row. The
    `rows().len()` check fails if this is skipped.
-4. If it has a subscription collector: `Provider`, `Provider::ALL`,
+4. If it has a quota collector: `Provider`, `Provider::ALL`,
    `ProviderSelection`, the fetch path, and a cache identity. If Herdr has
-   no integration for it, `integration_id` returns `None` (Agy, Muse).
-5. If its own transcript is the evidence, `event` must not read the pane
-   (Pi, omp, Muse, Cursor).
-6. Tests that name agents must walk `SUPPORTED`, not a copied list. A copied
-   list is how Muse missed the watcher-alive check and the "installs
-   everything" sidebar assertions.
+   no integration for it, `integration_id` returns `None` (Agy).
+5. Tests that name agents must walk `SUPPORTED`, not a copied list.
 
 Adding a **sidebar field** is the same shape as #76: a saved "everything on"
 list will not name the new field. `FieldSet::parse` has to keep reading that

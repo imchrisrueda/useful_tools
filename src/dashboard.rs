@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn renders_compact_remaining_values_with_reset_eta() {
         let snapshot = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Codex,
             vec![
                 UsageWindow::new(
                     WindowKind::FiveHour,
@@ -130,22 +130,18 @@ mod tests {
             ],
             1,
         );
-        let rendered = render_provider(
-            Provider::Claude,
-            Some(&snapshot),
-            0,
-            PercentStyle::default(),
-        );
+        let rendered =
+            render_provider(Provider::Codex, Some(&snapshot), 0, PercentStyle::default());
         assert_eq!(
             rendered,
-            "Claude WARN\r\n  5h 42% left reset 4h07m · 7d 73% left reset 2d3h"
+            "Codex WARN\r\n  5h 42% left reset 4h07m · 7d 73% left reset 2d3h"
         );
     }
 
     #[test]
     fn expired_windows_are_not_rendered_as_live_dashboard_quota() {
         let snapshot = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Codex,
             vec![UsageWindow::new(
                 WindowKind::FiveHour,
                 20.0,
@@ -155,47 +151,14 @@ mod tests {
             0,
         );
         let rendered = render_provider(
-            Provider::Claude,
+            Provider::Codex,
             Some(&snapshot),
             1_001,
             PercentStyle::default(),
         );
-        assert!(rendered.contains("Claude N/A"), "{rendered}");
+        assert!(rendered.contains("Codex N/A"), "{rendered}");
         assert!(!rendered.contains("80%"), "{rendered}");
         assert!(!rendered.contains("20%"), "{rendered}");
-    }
-
-    /// The sidebar has no monthly token, so the dashboard is where a Go plan's
-    /// 30d bucket has to surface. It appears only once something is cached.
-    #[test]
-    fn a_scoped_collector_appears_with_its_monthly_window_once_cached() {
-        let directory = tempdir().unwrap();
-        let cache = CacheStore::new(directory.path());
-        assert!(!render_snapshot(&cache).unwrap().contains("OpenCode Go"));
-
-        cache
-            .save(&ProviderSnapshot::new(
-                Provider::OpenCodeGo,
-                vec![
-                    UsageWindow::new(
-                        WindowKind::FiveHour,
-                        10.0,
-                        Some(ResetAt::from_unix_seconds(2_000_000_000)),
-                    )
-                    .unwrap(),
-                    UsageWindow::new(
-                        WindowKind::Monthly,
-                        30.0,
-                        Some(ResetAt::from_unix_seconds(2_000_000_000)),
-                    )
-                    .unwrap(),
-                ],
-                0,
-            ))
-            .unwrap();
-        let rendered = render_snapshot(&cache).unwrap();
-        assert!(rendered.contains("OpenCode Go"), "{rendered}");
-        assert!(rendered.contains("30d 70% left"), "{rendered}");
     }
 
     #[test]

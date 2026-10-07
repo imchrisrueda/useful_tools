@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./install.sh
-#   ./install.sh --agent claude,codex
+#   ./install.sh --agent codex,agy
 #   ./install.sh --watch-interval-seconds 300
 #   ./install.sh --sidebar-layout packed
 #   ./install.sh --row-gap 0
@@ -13,9 +13,9 @@
 #   ./install.sh --agent-order default
 #   ./install.sh --low-quota-alert 10
 #
-# --agent installs only the agents you name (all, claude, codex, grok, agy,
-# opencode, pi, omp, devin, muse, cursor). Anything you leave out gets no sidebar row, no
-# statusLine entry and no hook file. The default is every supported agent.
+# --agent installs only the agents you name (all, codex, agy).
+# Anything you leave out gets no sidebar row, no statusLine entry and no hook file.
+# The default is every supported agent.
 #
 # --sidebar-layout gauges (default) draws a meter beside each quota number.
 # packed joins cache/TTL and 5h/7d on one row. stacked puts provider, model,

@@ -31,7 +31,6 @@ pub enum ProviderError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::model::{Provider, ProviderSnapshot};
     #[test]
     fn all_direct_collectors_reject_unknown_or_other_account_snapshots() {

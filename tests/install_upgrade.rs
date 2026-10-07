@@ -1,6 +1,30 @@
 #![cfg(unix)]
 use std::{fs, os::unix::fs::PermissionsExt, process::Command};
 
+fn configure_action_command() -> String {
+    let manifest: toml_edit::DocumentMut = include_str!("../herdr-plugin.toml").parse().unwrap();
+    let actions = manifest
+        .get("actions")
+        .unwrap()
+        .as_array_of_tables()
+        .unwrap();
+    for action in actions {
+        if action.get("id").and_then(|id| id.as_str()) == Some("configure") {
+            return action
+                .get("command")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .get(2)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string();
+        }
+    }
+    panic!("configure action not found");
+}
+
 #[test]
 fn normal_upgrade_preserves_preferences_and_runs_recovery_in_the_server_environment() {
     let dir = tempfile::tempdir().unwrap();
@@ -14,15 +38,7 @@ fn normal_upgrade_preserves_preferences_and_runs_recovery_in_the_server_environm
     fs::write(config.join("sidebar-layout"), "stacked\n").unwrap();
     fs::write(config.join("watch-interval-seconds"), "300\n").unwrap();
     let log = dir.path().join("calls");
-    let manifest: toml::Value = toml::from_str(include_str!("../herdr-plugin.toml")).unwrap();
-    let configure = manifest["actions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|action| action["id"].as_str() == Some("configure"))
-        .unwrap()["command"][2]
-        .as_str()
-        .unwrap();
+    let configure = configure_action_command();
     for (path, script) in [
         (bin.join("cargo"), "#!/bin/sh\nexit 0\n"),
         (
@@ -95,15 +111,7 @@ fn an_explicit_install_agent_list_is_stored_as_a_subset() {
         fs::create_dir_all(path).unwrap();
     }
     let log = dir.path().join("calls");
-    let manifest: toml::Value = toml::from_str(include_str!("../herdr-plugin.toml")).unwrap();
-    let configure = manifest["actions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|action| action["id"].as_str() == Some("configure"))
-        .unwrap()["command"][2]
-        .as_str()
-        .unwrap();
+    let configure = configure_action_command();
     for (path, script) in [
         (bin.join("cargo"), "#!/bin/sh\nexit 0\n"),
         (
@@ -171,15 +179,7 @@ fn install_adopts_alias_plugin_dirs_then_unlinks_the_old_id() {
     fs::write(old_config.join("sidebar-layout"), "stacked\n").unwrap();
     fs::write(old_state.join("owned-font"), "keep-me\n").unwrap();
     let log = dir.path().join("calls");
-    let manifest: toml::Value = toml::from_str(include_str!("../herdr-plugin.toml")).unwrap();
-    let configure = manifest["actions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|action| action["id"].as_str() == Some("configure"))
-        .unwrap()["command"][2]
-        .as_str()
-        .unwrap();
+    let configure = configure_action_command();
     for (path, script) in [
         (bin.join("cargo"), "#!/bin/sh\nexit 0\n"),
         (
@@ -266,15 +266,7 @@ fn install_adopts_alias_directories_when_the_old_id_is_no_longer_listed() {
     fs::write(old_state.join("cursor-keychain-approved"), "ok\n").unwrap();
     fs::write(old_state.join("herdr-agent-quota-hooks.sh"), "stay\n").unwrap();
     let log = dir.path().join("calls");
-    let manifest: toml::Value = toml::from_str(include_str!("../herdr-plugin.toml")).unwrap();
-    let configure = manifest["actions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|action| action["id"].as_str() == Some("configure"))
-        .unwrap()["command"][2]
-        .as_str()
-        .unwrap();
+    let configure = configure_action_command();
     for (path, script) in [
         (bin.join("cargo"), "#!/bin/sh\nexit 0\n"),
         (

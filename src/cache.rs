@@ -126,64 +126,6 @@ impl CacheStore {
         Self::atomic_replace(&destination, &temporary, bytes)
     }
 
-    /// One sanitized report per OMP provider retains all reported account
-    /// pins without spawning the CLI once for each pane/account.
-    pub fn load_omp_usage(
-        &self,
-        target: &BillingTarget,
-    ) -> Option<crate::providers::omp::ProviderUsage> {
-        let bytes = fs::read(
-            self.root
-                .join(format!("{}.usage.json", target.cache_identity())),
-        )
-        .ok()?;
-        serde_json::from_slice(&bytes).ok()
-    }
-
-    pub fn save_omp_usage(
-        &self,
-        target: &BillingTarget,
-        usage: &crate::providers::omp::ProviderUsage,
-    ) -> Result<()> {
-        self.ensure()?;
-        let mut usage = usage.clone();
-        let previous_accounts = self
-            .load_omp_usage(target)
-            .map(|report| report.accounts)
-            .unwrap_or_else(|| {
-                self.load_target(target)
-                    .ok()
-                    .flatten()
-                    .map(|snapshot| {
-                        vec![crate::providers::omp::AccountUsage {
-                            pin: snapshot.account_id,
-                            windows: snapshot.windows,
-                            fetched_at_unix: snapshot.fetched_at_unix,
-                        }]
-                    })
-                    .unwrap_or_default()
-            });
-        for account in previous_accounts {
-            if account.pin.is_some()
-                && usage.oauth_without_usage_pins.contains(&account.pin)
-                && !usage
-                    .accounts
-                    .iter()
-                    .any(|current| current.pin == account.pin)
-            {
-                usage.accounts.push(account);
-            }
-        }
-        let name = format!("{}.usage.json", target.cache_identity());
-        Self::atomic_replace(
-            &self.root.join(&name),
-            &self
-                .root
-                .join(format!(".{name}.{}.tmp", std::process::id())),
-            serde_json::to_vec(&usage)?,
-        )
-    }
-
     pub fn should_debounce_target(
         &self,
         target: &BillingTarget,
@@ -1056,7 +998,7 @@ fn merge_session_quota_observations(
     session_id: Option<&str>,
     api_generation: Option<&str>,
 ) {
-    if snapshot.provider != Provider::Claude || !snapshot.session_quota_only {
+    if snapshot.provider != Provider::Agy || !snapshot.session_quota_only {
         return;
     }
 
@@ -1159,8 +1101,8 @@ fn merge_session_windows(
                 previous.and_then(|previous| previous_windows_for_merge(previous, id, None))
             {
                 let previous_windows = previous_windows.to_vec();
-                if snapshot.provider == Provider::Claude && snapshot.windows.is_empty() {
-                    // A Claude statusLine redraw can temporarily carry no
+                if snapshot.provider == Provider::Agy && snapshot.windows.is_empty() {
+                    // An Agy statusLine redraw can temporarily carry no
                     // rate_limits at all. That is "no new quota sample", not
                     // proof that this session's allowance disappeared. Keep
                     // only still-current last-known windows; their freshness
@@ -1393,7 +1335,12 @@ pub fn sanitize_statusline_payload(value: &Value) -> Value {
     let mut clean = serde_json::Map::new();
 
     // 1. Session and conversation IDs
-    for key in &["session_id", "sessionId", "conversation_id", "conversationId"] {
+    for key in &[
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "conversationId",
+    ] {
         if let Some(val) = source.get(*key).and_then(Value::as_str) {
             clean.insert((*key).to_string(), Value::String(val.to_string()));
         }
@@ -1420,14 +1367,22 @@ pub fn sanitize_statusline_payload(value: &Value) -> Value {
     if let Some(quota_obj) = source.get("quota").and_then(Value::as_object) {
         let mut clean_quota = serde_json::Map::new();
         let allowed_buckets = [
-            "gemini-5h", "gemini-weekly", "3p-5h", "3p-weekly",
-            "primary", "secondary",
+            "gemini-5h",
+            "gemini-weekly",
+            "3p-5h",
+            "3p-weekly",
+            "primary",
+            "secondary",
         ];
         let allowed_fields = [
-            "remaining_fraction", "remainingFraction",
-            "remaining_percent", "remainingPercentage",
-            "reset_time", "resetTime",
-            "reset_in_seconds", "resetInSeconds",
+            "remaining_fraction",
+            "remainingFraction",
+            "remaining_percent",
+            "remainingPercentage",
+            "reset_time",
+            "resetTime",
+            "reset_in_seconds",
+            "resetInSeconds",
         ];
         for bucket in &allowed_buckets {
             if let Some(bucket_obj) = quota_obj.get(*bucket).and_then(Value::as_object) {
@@ -1460,7 +1415,12 @@ pub fn sanitize_statusline_payload(value: &Value) -> Value {
     if let Some(ck) = context_key {
         if let Some(context_obj) = source.get(ck).and_then(Value::as_object) {
             let mut clean_context = serde_json::Map::new();
-            for field in &["used_percentage", "usedPercentage", "used_percent", "usedPercent"] {
+            for field in &[
+                "used_percentage",
+                "usedPercentage",
+                "used_percent",
+                "usedPercent",
+            ] {
                 if let Some(val) = context_obj.get(*field).and_then(Value::as_f64) {
                     clean_context.insert((*field).to_string(), serde_json::json!(val));
                 }
@@ -1476,11 +1436,16 @@ pub fn sanitize_statusline_payload(value: &Value) -> Value {
                 if let Some(usage_obj) = context_obj.get(uk).and_then(Value::as_object) {
                     let mut clean_usage = serde_json::Map::new();
                     for field in &[
-                        "input_tokens", "inputTokens",
-                        "output_tokens", "outputTokens",
-                        "cached_input_tokens", "cachedInputTokens",
-                        "cache_read_input_tokens", "cacheReadInputTokens",
-                        "cache_creation_input_tokens", "cacheCreationInputTokens",
+                        "input_tokens",
+                        "inputTokens",
+                        "output_tokens",
+                        "outputTokens",
+                        "cached_input_tokens",
+                        "cachedInputTokens",
+                        "cache_read_input_tokens",
+                        "cacheReadInputTokens",
+                        "cache_creation_input_tokens",
+                        "cacheCreationInputTokens",
                     ] {
                         if let Some(val) = usage_obj.get(*field).and_then(Value::as_u64) {
                             clean_usage.insert((*field).to_string(), Value::Number(val.into()));
@@ -1499,7 +1464,10 @@ pub fn sanitize_statusline_payload(value: &Value) -> Value {
 
     // 5. Transcript path
     if let Some(path) = source.get("transcript_path").and_then(Value::as_str) {
-        clean.insert("transcript_path".to_string(), Value::String(path.to_string()));
+        clean.insert(
+            "transcript_path".to_string(),
+            Value::String(path.to_string()),
+        );
     }
 
     // 6. Prompt cache (legacy compatibility)
@@ -1570,15 +1538,14 @@ fn sessions_match(previous_session_id: Option<&str>, session_id: Option<&str>) -
 mod tests {
     use super::{merge_profile_quota_windows, *};
     use crate::model::{
-        window_in, BillingTarget, CacheUsage, ContextUsage, Provider, ResetAt, UsageWindow,
-        WindowKind,
+        window_in, CacheUsage, ContextUsage, Provider, ResetAt, UsageWindow, WindowKind,
     };
     use serde_json::json;
     use tempfile::tempdir;
 
     fn snapshot() -> ProviderSnapshot {
         ProviderSnapshot::new(
-            Provider::Grok,
+            Provider::Codex,
             vec![UsageWindow::new(WindowKind::Weekly, 42.5, None).unwrap()],
             123,
         )
@@ -1607,79 +1574,15 @@ mod tests {
         let directory = tempdir().unwrap();
         let cache = CacheStore::new(directory.path());
         cache.save(&snapshot()).unwrap();
-        assert_eq!(cache.load(Provider::Grok).unwrap(), Some(snapshot()));
+        assert_eq!(cache.load(Provider::Codex).unwrap(), Some(snapshot()));
     }
 
     #[test]
-    fn omp_upgrade_preserves_only_an_explicitly_confirmed_failed_account() {
-        let directory = tempdir().unwrap();
-        let cache = CacheStore::new(directory.path());
-        let target = BillingTarget::omp("anthropic");
-        let mut previous = snapshot();
-        previous.account_id = Some("old-pin".into());
-        cache.save_target(&target, &previous).unwrap();
-        let usage = crate::providers::omp::ProviderUsage {
-            oauth_without_usage_pins: vec![Some("old-pin".into())],
-            ..Default::default()
-        };
-        cache.save_omp_usage(&target, &usage).unwrap();
-        let migrated = cache.load_omp_usage(&target).unwrap();
-        assert_eq!(migrated.accounts.len(), 1);
-        assert_eq!(migrated.accounts[0].windows, previous.windows);
-        cache.save_omp_usage(&target, &usage).unwrap();
-        assert_eq!(cache.load_omp_usage(&target).unwrap(), migrated);
-        cache
-            .save_omp_usage(
-                &target,
-                &crate::providers::omp::ProviderUsage {
-                    oauth_without_usage_pins: vec![Some("new-pin".into())],
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        assert!(cache.load_omp_usage(&target).unwrap().accounts.is_empty());
-    }
-
-    #[test]
-    fn opencode_go_lease_does_not_touch_original_four_cache_files() {
-        let directory = tempdir().unwrap();
-        let cache = CacheStore::new(directory.path());
-        let target = BillingTarget::opencode_go();
-        let lease = cache.try_lock_target_refresh(&target).unwrap();
-        assert!(lease.is_some());
-        assert!(directory
-            .path()
-            .join("opencode-go.opencode-store.refresh.lock")
-            .exists());
-        for filename in [
-            "codex-app-server.json",
-            "grok-cli-billing.json",
-            "claude-statusline.json",
-            "agy-statusline.json",
-            "codex-app-server.refresh.lock",
-            "grok-cli-billing.refresh.lock",
-            "claude-statusline.refresh.lock",
-            "agy-statusline.refresh.lock",
-            "codex-app-server.refresh",
-            "grok-cli-billing.refresh",
-            "claude-statusline.refresh",
-            "agy-statusline.refresh",
-        ] {
-            assert!(
-                !directory.path().join(filename).exists(),
-                "OpenCode lease created {filename}"
-            );
-        }
-    }
-
-    #[test]
-    fn original_four_snapshots_use_canonical_0_2_cache_filenames() {
+    fn canonical_cache_filenames() {
         let directory = tempdir().unwrap();
         let cache = CacheStore::new(directory.path());
         for (provider, filename) in [
             (Provider::Codex, "codex-app-server.json"),
-            (Provider::Grok, "grok-cli-billing.json"),
-            (Provider::Claude, "claude-statusline.json"),
             (Provider::Agy, "agy-statusline.json"),
         ] {
             cache
@@ -1700,30 +1603,26 @@ mod tests {
         let directory = tempdir().unwrap();
         let cache = CacheStore::new(directory.path());
         let previous = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Agy,
             vec![UsageWindow::new(WindowKind::Weekly, 27.0, None).unwrap()],
             1,
         )
         .with_context(Some(ContextUsage::new(23.5).unwrap()));
         cache
             .save_statusline_observation(
-                Provider::Claude,
+                Provider::Agy,
                 previous,
                 &json!({"session_id": "session-1"}),
             )
             .unwrap();
 
-        let latest = ProviderSnapshot::new(Provider::Claude, vec![], 2);
+        let latest = ProviderSnapshot::new(Provider::Agy, vec![], 2);
         cache
-            .save_statusline_observation(
-                Provider::Claude,
-                latest,
-                &json!({"session_id": "session-1"}),
-            )
+            .save_statusline_observation(Provider::Agy, latest, &json!({"session_id": "session-1"}))
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap();
         assert_eq!(saved.snapshot.windows.len(), 0);
@@ -1736,30 +1635,30 @@ mod tests {
         let cache = CacheStore::new(directory.path());
         cache
             .save_statusline_observation(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![], 1)
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![], 1)
                     .with_model(Some("Sonnet".to_string())),
                 &json!({"session_id": "session-1"}),
             )
             .unwrap();
         cache
             .save_statusline_observation(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![], 2)
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![], 2)
                     .with_model(Some("Opus".to_string())),
                 &json!({"conversation_id": "session-2"}),
             )
             .unwrap();
         cache
             .save_statusline_observation(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![], 3),
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![], 3),
                 &json!({"session_id": "session-2"}),
             )
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -1773,9 +1672,9 @@ mod tests {
         let cache = CacheStore::new(directory.path());
         cache
             .save_statusline_observation(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(WindowKind::Weekly, 10.0, None).unwrap()],
                     1,
                 ),
@@ -1784,9 +1683,9 @@ mod tests {
             .unwrap();
         cache
             .save_statusline_observation(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(WindowKind::Weekly, 90.0, None).unwrap()],
                     2,
                 ),
@@ -1795,7 +1694,7 @@ mod tests {
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -1816,9 +1715,9 @@ mod tests {
         let cache = CacheStore::new(directory.path());
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(
                         WindowKind::FiveHour,
                         5.0,
@@ -1833,9 +1732,9 @@ mod tests {
             .unwrap();
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(
                         WindowKind::FiveHour,
                         92.0,
@@ -1850,7 +1749,7 @@ mod tests {
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -1898,31 +1797,31 @@ mod tests {
         let cache = CacheStore::new(directory.path());
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(5.0, 16_000)], 1),
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(5.0, 16_000)], 1),
                 &json!({"session_id": "session-c"}),
                 Some("scope-w"),
             )
             .unwrap();
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(92.0, 16_000)], 2),
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(92.0, 16_000)], 2),
                 &json!({"session_id": "session-a"}),
                 Some("scope-w"),
             )
             .unwrap();
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(5.0, 16_000)], 3),
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(5.0, 16_000)], 3),
                 &json!({"session_id": "session-c"}),
                 Some("scope-w"),
             )
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -1956,23 +1855,23 @@ mod tests {
         let cache = CacheStore::new(directory.path());
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(92.0, 16_000)], 1),
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(92.0, 16_000)], 1),
                 &json!({"session_id": "session-a"}),
                 Some("scope-w"),
             )
             .unwrap();
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(5.0, 34_000)], 2),
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(5.0, 34_000)], 2),
                 &json!({"session_id": "session-a"}),
                 Some("scope-w"),
             )
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -1987,23 +1886,23 @@ mod tests {
         let cache = CacheStore::new(directory.path());
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(20.0, 34_000)], 1),
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(20.0, 34_000)], 1),
                 &json!({"session_id": "session-a"}),
                 Some("scope-w"),
             )
             .unwrap();
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(95.0, 16_000)], 2),
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(95.0, 16_000)], 2),
                 &json!({"session_id": "session-c"}),
                 Some("scope-w"),
             )
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2086,9 +1985,9 @@ mod tests {
         let cache = CacheStore::new(directory.path());
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(
                         WindowKind::FiveHour,
                         18.0,
@@ -2103,9 +2002,9 @@ mod tests {
             .unwrap();
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(
                         WindowKind::FiveHour,
                         82.0,
@@ -2120,7 +2019,7 @@ mod tests {
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2140,9 +2039,9 @@ mod tests {
         let cache = CacheStore::new(directory.path());
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(
                         WindowKind::FiveHour,
                         18.0,
@@ -2157,15 +2056,15 @@ mod tests {
             .unwrap();
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![], 2),
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![], 2),
                 &json!({"session_id": "session-b"}),
                 Some("scope-w"),
             )
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2185,9 +2084,9 @@ mod tests {
         let cache = CacheStore::new(directory.path());
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![
                         UsageWindow::new(
                             WindowKind::FiveHour,
@@ -2210,9 +2109,9 @@ mod tests {
             .unwrap();
         cache
             .save_statusline_observation_with_quota_scope(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(
                         WindowKind::Weekly,
                         66.0,
@@ -2227,7 +2126,7 @@ mod tests {
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2257,9 +2156,9 @@ mod tests {
         let cache = CacheStore::new(directory.path());
         cache
             .save_statusline_observation(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![
                         UsageWindow::new(
                             WindowKind::FiveHour,
@@ -2281,9 +2180,9 @@ mod tests {
             .unwrap();
         cache
             .save_statusline_observation(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(
                         WindowKind::Weekly,
                         90.0,
@@ -2297,9 +2196,9 @@ mod tests {
             .unwrap();
         cache
             .save_statusline_observation(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(
                         WindowKind::Weekly,
                         66.0,
@@ -2313,7 +2212,7 @@ mod tests {
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2340,8 +2239,8 @@ mod tests {
 
         cache
             .save_statusline_observation_with_api_generation(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(5.0, 16_000)], 100)
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(5.0, 16_000)], 100)
                     .session_local(),
                 &payload,
                 Some("generation-a"),
@@ -2349,8 +2248,8 @@ mod tests {
             .unwrap();
         cache
             .save_statusline_observation_with_api_generation(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(5.0, 16_000)], 300)
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(5.0, 16_000)], 300)
                     .session_local(),
                 &payload,
                 Some("generation-a"),
@@ -2358,7 +2257,7 @@ mod tests {
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2378,8 +2277,8 @@ mod tests {
         for (at, generation) in [(100, "generation-a"), (300, "generation-b")] {
             cache
                 .save_statusline_observation_with_api_generation(
-                    Provider::Claude,
-                    ProviderSnapshot::new(Provider::Claude, vec![five_hour(5.0, 16_000)], at)
+                    Provider::Agy,
+                    ProviderSnapshot::new(Provider::Agy, vec![five_hour(5.0, 16_000)], at)
                         .session_local(),
                     &payload,
                     Some(generation),
@@ -2388,7 +2287,7 @@ mod tests {
         }
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2406,9 +2305,9 @@ mod tests {
         let payload = json!({"session_id":"session-a"});
         cache
             .save_statusline_observation_with_api_generation(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![five_hour(22.0, 2_000), weekly(65.0, 10_000)],
                     100,
                 )
@@ -2419,8 +2318,8 @@ mod tests {
             .unwrap();
         cache
             .save_statusline_observation_with_api_generation(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![weekly(66.0, 10_000)], 300)
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![weekly(66.0, 10_000)], 300)
                     .session_local(),
                 &payload,
                 Some("generation-b"),
@@ -2428,7 +2327,7 @@ mod tests {
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2459,8 +2358,8 @@ mod tests {
         let cache = CacheStore::new(directory.path());
         cache.ensure().unwrap();
 
-        let mut legacy = ProviderSnapshot::new(Provider::Claude, vec![five_hour(5.0, 16_000)], 100)
-            .session_local();
+        let mut legacy =
+            ProviderSnapshot::new(Provider::Agy, vec![five_hour(5.0, 16_000)], 100).session_local();
         legacy
             .session_windows
             .insert("session-a".to_string(), legacy.windows.clone());
@@ -2470,22 +2369,22 @@ mod tests {
             payload: payload.clone(),
         };
         fs::write(
-            cache.statusline_observation_path(Provider::Claude),
+            cache.statusline_observation_path(Provider::Agy),
             serde_json::to_vec(&stored).unwrap(),
         )
         .unwrap();
 
         cache
             .save_statusline_observation_with_api_generation(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(5.0, 16_000)], 200)
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(5.0, 16_000)], 200)
                     .session_local(),
                 &payload,
                 Some("generation-a"),
             )
             .unwrap();
         let baseline = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2497,15 +2396,15 @@ mod tests {
 
         cache
             .save_statusline_observation_with_api_generation(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(5.0, 16_000)], 300)
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(5.0, 16_000)], 300)
                     .session_local(),
                 &payload,
                 Some("generation-b"),
             )
             .unwrap();
         let refreshed = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2526,8 +2425,8 @@ mod tests {
 
         cache
             .save_statusline_observation_with_api_generation(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![five_hour(22.0, 2_000)], 100)
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![five_hour(22.0, 2_000)], 100)
                     .session_local(),
                 &payload,
                 Some("generation-a"),
@@ -2535,15 +2434,15 @@ mod tests {
             .unwrap();
         cache
             .save_statusline_observation_with_api_generation(
-                Provider::Claude,
-                ProviderSnapshot::new(Provider::Claude, vec![], 300).session_local(),
+                Provider::Agy,
+                ProviderSnapshot::new(Provider::Agy, vec![], 300).session_local(),
                 &payload,
                 Some("generation-b"),
             )
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2582,7 +2481,7 @@ mod tests {
         let latest = snapshot().with_context(Some(ContextUsage::new(24.0).unwrap()));
         cache.save_preserving_context(latest).unwrap();
         let saved_context = cache
-            .load(Provider::Grok)
+            .load(Provider::Codex)
             .unwrap()
             .unwrap()
             .context
@@ -2599,7 +2498,7 @@ mod tests {
         cache
             .save_preserving_context_for_session(current, Some("session-1"))
             .unwrap();
-        let saved = cache.load(Provider::Grok).unwrap().unwrap();
+        let saved = cache.load(Provider::Codex).unwrap().unwrap();
         assert_eq!(
             saved
                 .context_for_session(Some("session-1"))
@@ -2628,7 +2527,7 @@ mod tests {
         cache
             .save_preserving_context_for_session(current, Some("session-1"))
             .unwrap();
-        let saved = cache.load(Provider::Grok).unwrap().unwrap();
+        let saved = cache.load(Provider::Codex).unwrap().unwrap();
         assert_eq!(saved.session_models["session-1"], "Sonnet");
     }
 
@@ -2648,7 +2547,7 @@ mod tests {
 
         let latest = snapshot().with_account_id(Some("account-1".to_string()));
         cache.save_preserving_diagnostics(latest).unwrap();
-        let saved = cache.load(Provider::Grok).unwrap().unwrap();
+        let saved = cache.load(Provider::Codex).unwrap().unwrap();
         assert_eq!(saved.model.as_deref(), Some("grok-4.6"));
         assert_eq!(saved.session_models["session-1"], "grok-4.6");
         assert!(saved.session_contexts.contains_key("session-1"));
@@ -2675,7 +2574,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        let saved = cache.load(Provider::Grok).unwrap().unwrap();
+        let saved = cache.load(Provider::Codex).unwrap().unwrap();
         assert!(saved.context_for_session(Some("new-session")).is_none());
     }
 
@@ -2706,7 +2605,7 @@ mod tests {
             .save_preserving_diagnostics_for_sessions(&mut latest, &["pane-a".to_string()], None)
             .unwrap();
 
-        let saved = cache.load(Provider::Grok).unwrap().unwrap();
+        let saved = cache.load(Provider::Codex).unwrap().unwrap();
         assert_eq!(
             saved
                 .context_for_session(Some("pane-a"))
@@ -2741,7 +2640,7 @@ mod tests {
         cache.save(&previous).unwrap();
 
         cache.save_preserving_diagnostics(snapshot()).unwrap();
-        let saved = cache.load(Provider::Grok).unwrap().unwrap();
+        let saved = cache.load(Provider::Codex).unwrap().unwrap();
         assert_eq!(saved.session_models.len(), MAX_STATUSLINE_SESSIONS);
         assert_eq!(saved.session_contexts.len(), MAX_STATUSLINE_SESSIONS);
     }
@@ -2858,7 +2757,7 @@ mod tests {
         cache
             .save_preserving_context_for_session(same_session, Some("session-1"))
             .unwrap();
-        let saved = cache.load(Provider::Grok).unwrap().unwrap();
+        let saved = cache.load(Provider::Codex).unwrap().unwrap();
         let saved_cache = saved.context.unwrap().cache.unwrap();
         assert_eq!(saved_cache.session_totals, previous_cache.session_totals);
         assert_eq!(saved_cache.transcript_offset, 512);
@@ -2875,7 +2774,7 @@ mod tests {
             .save_preserving_context_for_session(new_session, Some("session-2"))
             .unwrap();
         let saved_cache = cache
-            .load(Provider::Grok)
+            .load(Provider::Codex)
             .unwrap()
             .unwrap()
             .context
@@ -2890,7 +2789,7 @@ mod tests {
     fn statusline_new_session_does_not_inherit_previous_cache_diagnostics() {
         let directory = tempdir().unwrap();
         let cache = CacheStore::new(directory.path());
-        let previous = ProviderSnapshot::new(Provider::Claude, vec![], 1).with_context(Some(
+        let previous = ProviderSnapshot::new(Provider::Agy, vec![], 1).with_context(Some(
             ContextUsage::new(23.5).unwrap().with_cache(Some(
                 CacheUsage::from_token_counts(10, 90, 0)
                     .unwrap()
@@ -2903,24 +2802,20 @@ mod tests {
         ));
         cache
             .save_statusline_observation(
-                Provider::Claude,
+                Provider::Agy,
                 previous,
                 &json!({"session_id": "session-1"}),
             )
             .unwrap();
 
-        let latest = ProviderSnapshot::new(Provider::Claude, vec![], 2)
+        let latest = ProviderSnapshot::new(Provider::Agy, vec![], 2)
             .with_context(Some(ContextUsage::new(0.0).unwrap()));
         cache
-            .save_statusline_observation(
-                Provider::Claude,
-                latest,
-                &json!({"session_id": "session-2"}),
-            )
+            .save_statusline_observation(Provider::Agy, latest, &json!({"session_id": "session-2"}))
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2940,8 +2835,8 @@ mod tests {
             let session_id = format!("session-{index}");
             cache
                 .save_statusline_observation(
-                    Provider::Claude,
-                    ProviderSnapshot::new(Provider::Claude, vec![], index as u64)
+                    Provider::Agy,
+                    ProviderSnapshot::new(Provider::Agy, vec![], index as u64)
                         .with_model(Some(format!("model-{index}")))
                         .with_context(Some(ContextUsage::new(0.0).unwrap())),
                     &json!({"session_id": session_id}),
@@ -2950,7 +2845,7 @@ mod tests {
         }
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -2971,9 +2866,9 @@ mod tests {
             let scope = format!("scope-{index}");
             cache
                 .save_statusline_observation_with_quota_scope(
-                    Provider::Claude,
+                    Provider::Agy,
                     ProviderSnapshot::new(
-                        Provider::Claude,
+                        Provider::Agy,
                         vec![UsageWindow::new(WindowKind::Weekly, 1.0, None).unwrap()],
                         index as u64,
                     )
@@ -2986,7 +2881,7 @@ mod tests {
         }
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -3002,7 +2897,7 @@ mod tests {
     fn missing_cache_is_not_an_error() {
         let directory = tempdir().unwrap();
         let cache = CacheStore::new(directory.path());
-        assert_eq!(cache.load(Provider::Claude).unwrap(), None);
+        assert_eq!(cache.load(Provider::Agy).unwrap(), None);
     }
 
     #[test]
@@ -3010,7 +2905,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let cache = CacheStore::new(directory.path());
         let previous = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Agy,
             vec![
                 UsageWindow::new(
                     WindowKind::FiveHour,
@@ -3030,7 +2925,7 @@ mod tests {
         cache.save(&previous).unwrap();
 
         let current = ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Agy,
             vec![UsageWindow::new(
                 WindowKind::Weekly,
                 66.0,
@@ -3042,7 +2937,7 @@ mod tests {
         cache
             .save_preserving_context_for_session(current, Some("session-1"))
             .unwrap();
-        let saved = cache.load(Provider::Claude).unwrap().unwrap();
+        let saved = cache.load(Provider::Agy).unwrap().unwrap();
         assert_eq!(
             saved.window(WindowKind::FiveHour).unwrap().used_percent,
             22.0
@@ -3069,9 +2964,9 @@ mod tests {
         let payload = json!({"session_id": "session-1"});
         cache
             .save_statusline_observation(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![
                         UsageWindow::new(
                             WindowKind::FiveHour,
@@ -3095,9 +2990,9 @@ mod tests {
 
         cache
             .save_statusline_observation(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(
                         WindowKind::Weekly,
                         20.0,
@@ -3112,7 +3007,7 @@ mod tests {
             .unwrap();
 
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -3136,9 +3031,9 @@ mod tests {
         // has elapsed the stale reading is dropped rather than carried forward.
         cache
             .save_statusline_observation(
-                Provider::Claude,
+                Provider::Agy,
                 ProviderSnapshot::new(
-                    Provider::Claude,
+                    Provider::Agy,
                     vec![UsageWindow::new(
                         WindowKind::Weekly,
                         20.0,
@@ -3152,7 +3047,7 @@ mod tests {
             )
             .unwrap();
         let saved = cache
-            .load_statusline_observation(Provider::Claude)
+            .load_statusline_observation(Provider::Agy)
             .unwrap()
             .unwrap()
             .snapshot;
@@ -3184,10 +3079,10 @@ mod tests {
     fn provider_refresh_lease_is_non_blocking_and_scoped_to_one_provider() {
         let directory = tempdir().unwrap();
         let cache = CacheStore::new(directory.path());
-        let first = cache.try_lock_provider_refresh(Provider::Claude).unwrap();
+        let first = cache.try_lock_provider_refresh(Provider::Codex).unwrap();
         assert!(first.is_some());
         assert!(cache
-            .try_lock_provider_refresh(Provider::Claude)
+            .try_lock_provider_refresh(Provider::Codex)
             .unwrap()
             .is_none());
         assert!(cache
@@ -3305,14 +3200,26 @@ mod tests {
             .expect("should load observation");
 
         let payload = loaded.payload;
-        assert_eq!(payload.get("session_id").and_then(Value::as_str), Some("session-clean"));
+        assert_eq!(
+            payload.get("session_id").and_then(Value::as_str),
+            Some("session-clean")
+        );
         assert!(payload.get("user_prompt").is_none());
         assert!(payload.get("history").is_none());
         assert!(payload.get("bearer_token").is_none());
-        assert!(payload.get("quota").and_then(|q| q.get("leak_bucket")).is_none());
-        assert!(payload.get("context_window").and_then(|c| c.get("secret_debug")).is_none());
+        assert!(payload
+            .get("quota")
+            .and_then(|q| q.get("leak_bucket"))
+            .is_none());
+        assert!(payload
+            .get("context_window")
+            .and_then(|c| c.get("secret_debug"))
+            .is_none());
         assert_eq!(
-            payload.get("model").and_then(|m| m.get("display_name")).and_then(Value::as_str),
+            payload
+                .get("model")
+                .and_then(|m| m.get("display_name"))
+                .and_then(Value::as_str),
             Some("Gemini 2.5 Flash")
         );
     }

@@ -156,15 +156,30 @@ mod tests {
         let cached = observation_for_cache(&raw, Some("w1:p2"));
 
         // Must preserve whitelisted fields
-        assert_eq!(cached.get("session_id").and_then(Value::as_str), Some("w1:p2"));
-        assert_eq!(cached.get("conversation_id").and_then(Value::as_str), Some("conv-1"));
         assert_eq!(
-            cached.get("model").and_then(|m| m.get("display_name")).and_then(Value::as_str),
+            cached.get("session_id").and_then(Value::as_str),
+            Some("w1:p2")
+        );
+        assert_eq!(
+            cached.get("conversation_id").and_then(Value::as_str),
+            Some("conv-1")
+        );
+        assert_eq!(
+            cached
+                .get("model")
+                .and_then(|m| m.get("display_name"))
+                .and_then(Value::as_str),
             Some("Gemini 2.5 Pro")
         );
-        assert!(cached.get("quota").and_then(|q| q.get("gemini-5h")).is_some());
+        assert!(cached
+            .get("quota")
+            .and_then(|q| q.get("gemini-5h"))
+            .is_some());
         assert_eq!(
-            cached.get("context_window").and_then(|c| c.get("used_percentage")).and_then(Value::as_f64),
+            cached
+                .get("context_window")
+                .and_then(|c| c.get("used_percentage"))
+                .and_then(Value::as_f64),
             Some(25.0)
         );
 
@@ -173,7 +188,13 @@ mod tests {
         assert!(cached.get("messages").is_none());
         assert!(cached.get("api_key").is_none());
         assert!(cached.get("unknown_metadata").is_none());
-        assert!(cached.get("quota").and_then(|q| q.get("secret_pool")).is_none());
-        assert!(cached.get("context_window").and_then(|c| c.get("secret_detail")).is_none());
+        assert!(cached
+            .get("quota")
+            .and_then(|q| q.get("secret_pool"))
+            .is_none());
+        assert!(cached
+            .get("context_window")
+            .and_then(|c| c.get("secret_detail"))
+            .is_none());
     }
 }

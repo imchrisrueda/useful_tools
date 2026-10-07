@@ -214,7 +214,9 @@ pub(crate) fn settings_path(environment: &str, relative: &str) -> Result<PathBuf
     if let Some(path) = std::env::var_os(environment) {
         return Ok(PathBuf::from(path));
     }
-    let home = std::env::var_os("HOME").context("HOME is not set")?;
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .context("Neither HOME nor USERPROFILE is set")?;
     Ok(PathBuf::from(home).join(relative))
 }
 

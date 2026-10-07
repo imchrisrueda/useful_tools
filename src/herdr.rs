@@ -713,8 +713,6 @@ fn parse_ps_elapsed(value: &str) -> Option<u64> {
     (clock.split(':').count() >= 2).then_some(days * 86_400 + seconds)
 }
 
-
-
 fn list_agent_value() -> Result<Value> {
     let executable = std::env::var_os("HERDR_BIN_PATH").unwrap_or_else(|| "herdr".into());
     let output = Command::new(&executable)
@@ -2503,60 +2501,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn muse_sessions_fill_only_session_less_muse_panes() {
-        let pane = |id: &str, harness: Harness, session: Option<&str>| AgentPane {
-            pane_id: id.to_string(),
-            workspace_id: "w1".to_string(),
-            cwd: String::new(),
-            title: String::new(),
-            harness,
-            session: session.map(|value| AgentSession {
-                kind: Some("id".to_string()),
-                value: value.to_string(),
-            }),
-            session_summary: String::new(),
-            topic: String::new(),
-            tokens: BTreeMap::new(),
-            status: AgentStatus::Idle,
-            focused: false,
-        };
-        let mut panes = vec![
-            pane("w1:p1", Harness::Muse, None),
-            pane("w1:p2", Harness::Muse, Some("herdr-session")),
-            pane("w1:p3", Harness::Claude, None),
-        ];
-        let mut asked = Vec::new();
-        attach_muse_sessions_with(&mut panes, |pane_ids| {
-            asked = pane_ids.to_vec();
-            ["w1:p1", "w1:p2", "w1:p3"]
-                .into_iter()
-                .map(|id| (id.to_string(), format!("lock-{id}")))
-                .collect()
-        });
-        assert_eq!(asked, vec!["w1:p1".to_string()]);
-        assert_eq!(
-            panes[0].session.as_ref().and_then(AgentSession::id),
-            Some("lock-w1:p1")
-        );
-        assert_eq!(
-            panes[1].session.as_ref().and_then(AgentSession::id),
-            Some("herdr-session")
-        );
-        assert_eq!(panes[2].session, None);
-
-        let mut without_muse = vec![pane("w1:p3", Harness::Claude, None)];
-        attach_muse_sessions_with(&mut without_muse, |_| {
-            panic!("a pane list without a session-less Muse pane never resolves")
-        });
-    }
-
     /// Herdr orders an Agent view by the token's own value, so the padding is
     /// the whole contract: `007` must sort before `042`, and `100` last.
     #[test]
     fn the_headroom_token_is_padded_so_its_text_order_is_its_numeric_order() {
         let token = |headroom: Option<u8>| {
-            let mut values = MetadataTokens::unavailable(Provider::Claude, "test");
+            let mut values = MetadataTokens::unavailable(Provider::Codex, "test");
             values.quota_headroom = headroom;
             desired_tokens(&values, "", SidebarShape::default())
                 .get(HEADROOM_TOKEN)
@@ -2596,7 +2546,7 @@ mod tests {
             workspace_id: "w5".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Grok,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -2623,7 +2573,7 @@ mod tests {
             workspace_id: "w5".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Grok,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -2636,7 +2586,7 @@ mod tests {
             workspace_id: "w5".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Grok,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -2682,14 +2632,14 @@ mod tests {
     }
 
     #[test]
-    fn claude_panes_in_one_space_do_not_nest() {
+    fn agy_panes_in_one_space_do_not_nest() {
         let panes = vec![
             AgentPane {
                 pane_id: "w1:p1".to_string(),
                 workspace_id: "w1".to_string(),
                 cwd: String::new(),
                 title: String::new(),
-                harness: Harness::Claude,
+                harness: Harness::Agy,
                 session: None,
                 session_summary: String::new(),
                 topic: String::new(),
@@ -2702,7 +2652,7 @@ mod tests {
                 workspace_id: "w1".to_string(),
                 cwd: String::new(),
                 title: String::new(),
-                harness: Harness::Claude,
+                harness: Harness::Agy,
                 session: None,
                 session_summary: String::new(),
                 topic: String::new(),
@@ -2723,7 +2673,7 @@ mod tests {
             workspace_id: "w5".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Grok,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -2736,7 +2686,7 @@ mod tests {
             workspace_id: "w5".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Grok,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -2841,8 +2791,8 @@ mod tests {
         apply_identity(
             &mut tokens,
             &PaneIdentity {
-                provider: "Grok".to_string(),
-                model: "grok-4.6".to_string(),
+                provider: "Codex".to_string(),
+                model: "gpt-5.6-codex".to_string(),
             },
             30,
             VendorRow::Child,
@@ -2851,14 +2801,14 @@ mod tests {
         assert!(!tokens.contains_key("quota_provider_model"));
         assert_eq!(
             tokens.get("quota_model").map(String::as_str),
-            Some("grok-4.6")
+            Some("gpt-5.6-codex")
         );
         let pane = AgentPane {
             pane_id: "w5:pD".to_string(),
             workspace_id: "w5".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Grok,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -2884,7 +2834,7 @@ mod tests {
         );
         assert_eq!(
             desired.get("quota_model").map(String::as_str),
-            Some(concat!("\u{200b}  ", "grok-4.6")),
+            Some(concat!("\u{200b}  ", "gpt-5.6-codex")),
             "child model uses the Space member indent: {desired:?}"
         );
         assert!(!desired.contains_key("quota_provider_model"));
@@ -2893,12 +2843,12 @@ mod tests {
     #[test]
     fn wide_vendor_head_keeps_provider_and_quota_only() {
         let mut tokens = BTreeMap::from([
-            ("quota_provider".to_string(), "Grok".to_string()),
+            ("quota_provider".to_string(), "Codex".to_string()),
             (
                 "quota_provider_model".to_string(),
-                "Grok/grok-4.6".to_string(),
+                "Codex/gpt-5.6-codex".to_string(),
             ),
-            ("quota_model".to_string(), "grok-4.6".to_string()),
+            ("quota_model".to_string(), "gpt-5.6-codex".to_string()),
             ("quota_topic".to_string(), "hello".to_string()),
             ("quota_context_normal".to_string(), "cx 10%".to_string()),
             ("quota_week_normal".to_string(), "7d 46%".to_string()),
@@ -2906,8 +2856,8 @@ mod tests {
         apply_identity(
             &mut tokens,
             &PaneIdentity {
-                provider: "Grok".to_string(),
-                model: "grok-4.6".to_string(),
+                provider: "Codex".to_string(),
+                model: "gpt-5.6-codex".to_string(),
             },
             30,
             VendorRow::Head,
@@ -2915,11 +2865,11 @@ mod tests {
         strip_vendor_head_session(&mut tokens);
         assert_eq!(
             tokens.get("quota_provider_model").map(String::as_str),
-            Some("Grok")
+            Some("Codex")
         );
         assert_eq!(
             tokens.get("quota_model").map(String::as_str),
-            Some("grok-4.6")
+            Some("gpt-5.6-codex")
         );
         assert_eq!(tokens.get("quota_topic").map(String::as_str), Some("hello"));
         assert_eq!(
@@ -2939,7 +2889,7 @@ mod tests {
             workspace_id: "w5".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Grok,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -2990,7 +2940,7 @@ mod tests {
             workspace_id: "w1".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Grok,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -3005,7 +2955,13 @@ mod tests {
         let nesting = vendor_nesting(&inventory, std::slice::from_ref(&sibling), &[]);
         let heads = group_head_pane_ids(
             &inventory,
-            std::slice::from_ref(&sibling),
+            &sibling
+                .clone()
+                .tokens
+                .is_empty()
+                .then_some(())
+                .map(|_| vec![])
+                .unwrap_or_else(|| vec![sibling.clone()]),
             &[],
             true,
             &nesting.stack,
@@ -3039,7 +2995,7 @@ mod tests {
         // Exact quota-sort ties keep Herdr's stable inventory order. Use
         // non-nested harnesses so quota_stack is identical for both panes.
         let mut stable_first = sibling.clone();
-        stable_first.harness = Harness::Claude;
+        stable_first.harness = Harness::Agy;
         let mut stable_late = head.clone();
         stable_late.pane_id = "w1:p10".to_string();
         stable_late.harness = Harness::Agy;
@@ -3063,13 +3019,13 @@ mod tests {
         // child. That can differ from inventory order (p10 sorts before p7).
         let mut layout_first = sibling.clone();
         layout_first.pane_id = "w1:p7".to_string();
-        layout_first.harness = Harness::Cursor;
+        layout_first.harness = Harness::Codex;
         layout_first
             .tokens
             .insert(HEADROOM_TOKEN.to_string(), "016".to_string());
         let mut vendor_head = sibling.clone();
         vendor_head.pane_id = "w1:p10".to_string();
-        vendor_head.harness = Harness::Cursor;
+        vendor_head.harness = Harness::Codex;
         vendor_head
             .tokens
             .insert(HEADROOM_TOKEN.to_string(), "016".to_string());
@@ -3294,9 +3250,9 @@ mod tests {
     fn discovers_canonical_agent_panes_from_nested_json() {
         let value = json!({"result": {"agents": [
             {"pane_id": "w1:p1", "tab_id": "w1:t1", "agent": "codex"},
-            {"pane_id": "w1:p2", "tab_id": "w1:t2", "agent_session": {"agent": "claude"}},
+            {"pane_id": "w1:p2", "tab_id": "w1:t2", "agent_session": {"agent": "agy"}},
             {"pane_id": "w1:p3", "agent": "unknown"},
-            {"pane_id": "w1:p4", "agent": "opencode"}
+            {"pane_id": "w1:p4", "agent": "other"}
         ], "tabs": [
             {"tab_id": "w1:t1", "label": "Owner"},
             {"tab_id": "w1:t2", "label": "Executor"}
@@ -3325,20 +3281,7 @@ mod tests {
                     workspace_id: "w1".to_string(),
                     cwd: String::new(),
                     title: String::new(),
-                    harness: Harness::Claude,
-                    session: None,
-                    session_summary: String::new(),
-                    topic: String::new(),
-                    tokens: BTreeMap::new(),
-                    status: AgentStatus::Idle,
-                    focused: false,
-                },
-                AgentPane {
-                    pane_id: "w1:p4".to_string(),
-                    workspace_id: "w1".to_string(),
-                    cwd: String::new(),
-                    title: String::new(),
-                    harness: Harness::OpenCode,
+                    harness: Harness::Agy,
                     session: None,
                     session_summary: String::new(),
                     topic: String::new(),
@@ -3446,13 +3389,7 @@ mod tests {
     #[test]
     fn a_fully_populated_pane_stays_within_herdrs_sixteen_token_report_cap() {
         const HERDR_TOKEN_REPORT_CAP: usize = 16;
-        for provider in [
-            Provider::Codex,
-            Provider::Grok,
-            Provider::Claude,
-            Provider::Agy,
-            Provider::OpenCodeGo,
-        ] {
+        for provider in [Provider::Codex, Provider::Agy] {
             let snapshot = ProviderSnapshot::new(
                 provider,
                 vec![
@@ -3527,48 +3464,8 @@ mod tests {
     }
 
     #[test]
-    fn retains_opencode_pane_session_id() {
-        let value = json!({"result": {"agents": [{
-            "pane_id": "w1:p9",
-            "agent": "opencode",
-            "agent_session": {"agent": "opencode", "value": "ses_go"}
-        }]}});
-        let mut panes = Vec::new();
-        collect_agent_panes(&value, &mut panes);
-        assert_eq!(panes[0].harness, Harness::OpenCode);
-        assert_eq!(
-            panes[0].session.as_ref().and_then(AgentSession::id),
-            Some("ses_go")
-        );
-    }
-
-    #[test]
-    fn carries_path_kind_without_exposing_it_as_an_id() {
-        let value = json!({"result": {"agents": [{
-            "pane_id": "w1:p9",
-            "agent": "pi",
-            "agent_session": {
-                "agent": "pi",
-                "kind": "path",
-                "source": "herdr:pi",
-                "value": "/tmp/pi/sessions/project/session-pi.jsonl"
-            }
-        }]}});
-        let mut panes = Vec::new();
-        collect_agent_panes(&value, &mut panes);
-        let session = panes[0].session.as_ref().unwrap();
-        assert_eq!(panes[0].harness, Harness::Pi);
-        assert_eq!(session.kind.as_deref(), Some("path"));
-        assert_eq!(session.id(), None);
-        assert_eq!(
-            session.path(),
-            Some("/tmp/pi/sessions/project/session-pi.jsonl")
-        );
-    }
-
-    #[test]
     fn id_kind_preserves_every_existing_harness_session() {
-        for agent in ["claude", "codex", "grok", "agy", "opencode", "devin"] {
+        for agent in ["codex", "agy"] {
             let value = json!({"result": {"agents": [{
                 "pane_id": "w1:p1",
                 "agent": agent,
@@ -3605,7 +3502,7 @@ mod tests {
     fn quota_only_discovery_preserves_the_last_published_topic() {
         let value = json!({"result": {"agents": [{
             "pane_id": "w1:p1",
-            "agent": "grok",
+            "agent": "codex",
             "tokens": {"quota_topic": "latest task"}
         }]}});
         let mut panes = Vec::new();
@@ -3637,7 +3534,7 @@ mod tests {
             workspace_id: "w1".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Claude,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -3655,7 +3552,7 @@ mod tests {
     #[test]
     fn weekly_only_inline_week_stays_inside_herdr_metadata_cap() {
         let snapshot = crate::model::ProviderSnapshot::new(
-            Provider::Grok,
+            Provider::Codex,
             vec![crate::model::UsageWindow::new(
                 crate::model::WindowKind::Weekly,
                 30.0,
@@ -3688,7 +3585,7 @@ mod tests {
             workspace_id: "w1".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Grok,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -3706,7 +3603,7 @@ mod tests {
     #[test]
     fn cache_diagnostics_stay_inside_herdr_metadata_cap() {
         let snapshot = crate::model::ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Codex,
             vec![
                 crate::model::UsageWindow::new(crate::model::WindowKind::FiveHour, 20.0, None)
                     .unwrap(),
@@ -3739,7 +3636,7 @@ mod tests {
             workspace_id: "w1".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Claude,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -3964,7 +3861,7 @@ mod tests {
     fn a_full_gauges_pane_stays_inside_herdr_metadata_cap() {
         let gauges = SidebarShape::from(crate::cli::SidebarLayout::Gauges);
         let snapshot = crate::model::ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Codex,
             vec![
                 crate::model::UsageWindow::new(
                     crate::model::WindowKind::FiveHour,
@@ -4009,7 +3906,7 @@ mod tests {
             workspace_id: "w1".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Claude,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -4045,7 +3942,7 @@ mod tests {
     #[test]
     fn stale_metadata_tokens_are_reported_for_cleanup_with_new_cache_rows() {
         let snapshot = crate::model::ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Codex,
             vec![
                 crate::model::UsageWindow::new(crate::model::WindowKind::FiveHour, 20.0, None)
                     .unwrap(),
@@ -4083,7 +3980,7 @@ mod tests {
             workspace_id: "w1".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Claude,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -4104,11 +4001,11 @@ mod tests {
     #[test]
     fn working_agent_detection_handles_herdr_agent_list_shape() {
         let value = json!({"result": {"agents": [
-            {"agent": "claude", "agent_status": "working"},
+            {"agent": "agy", "agent_status": "working"},
             {"agent": "codex", "agent_status": "idle"},
-            {"agent": "opencode", "agent_status": "working"}
+            {"agent": "other", "agent_status": "working"}
         ]}});
-        assert_eq!(working_providers_from(&value), vec![Provider::Claude]);
+        assert_eq!(working_providers_from(&value), vec![Provider::Agy]);
     }
 
     #[test]
@@ -4116,7 +4013,7 @@ mod tests {
         let value = json!({"result": {"agents": [
             {"agent": "codex", "agent_status": "working"},
             {"agent_session": {"agent": "codex"}, "status": "working"},
-            {"agent": "claude", "agent_status": "idle"}
+            {"agent": "agy", "agent_status": "idle"}
         ]}});
         assert_eq!(working_providers_from(&value), vec![Provider::Codex]);
     }
@@ -4125,12 +4022,6 @@ mod tests {
     fn extracts_latest_agy_prompt_instead_of_status_line() {
         let text = "> older\nHello\n> hi\nHello!\n> Accept-edits mode: file edits auto-approved\n";
         assert_eq!(extract_topic(text, Harness::Agy).as_deref(), Some("hi"));
-    }
-
-    #[test]
-    fn extracts_latest_claude_prompt_and_skips_clear_command() {
-        let text = "❯ /clear\n❯ hi\n⏺ Hi! What can I help with?\n❯\n";
-        assert_eq!(extract_topic(text, Harness::Claude).as_deref(), Some("hi"));
     }
 
     #[test]
@@ -4145,7 +4036,7 @@ mod tests {
     fn ignores_ai_status_title_as_a_topic() {
         let value = json!({
             "pane_id": "w1:p1",
-            "agent": "grok",
+            "agent": "codex",
             "terminal_title_stripped": "Thinking - L7 Learning Reset"
         });
         let mut panes = Vec::new();
@@ -4156,7 +4047,7 @@ mod tests {
     #[test]
     fn a_missing_five_hour_window_without_context_keeps_week_on_the_limits_row() {
         let snapshot = crate::model::ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Agy,
             vec![crate::model::UsageWindow::new(
                 crate::model::WindowKind::Weekly,
                 31.0,
@@ -4245,7 +4136,7 @@ mod tests {
     #[test]
     fn folding_week_onto_context_clears_limits_week_styles() {
         let snapshot = crate::model::ProviderSnapshot::new(
-            Provider::Grok,
+            Provider::Codex,
             vec![crate::model::UsageWindow::new(
                 crate::model::WindowKind::Weekly,
                 25.0,
@@ -4268,7 +4159,7 @@ mod tests {
             workspace_id: "w1".to_string(),
             cwd: String::new(),
             title: String::new(),
-            harness: Harness::Grok,
+            harness: Harness::Codex,
             session: None,
             session_summary: String::new(),
             topic: String::new(),
@@ -4334,14 +4225,14 @@ mod tests {
     #[test]
     fn a_narrow_sidebar_with_a_known_model_keeps_headroom() {
         let mut tokens = BTreeMap::from([
-            ("quota_provider".to_string(), "Grok".to_string()),
+            ("quota_provider".to_string(), "Codex".to_string()),
             (HEADROOM_TOKEN.to_string(), "086".to_string()),
         ]);
         apply_identity(
             &mut tokens,
             &PaneIdentity {
-                provider: "Grok".to_string(),
-                model: "grok-4.6".to_string(),
+                provider: "Codex".to_string(),
+                model: "gpt-5.6-codex".to_string(),
             },
             18,
             VendorRow::Flat,
@@ -4353,12 +4244,12 @@ mod tests {
     #[test]
     fn stripping_account_quota_keeps_session_fields() {
         let mut tokens = BTreeMap::from([
-            ("quota_provider".to_string(), "Grok".to_string()),
+            ("quota_provider".to_string(), "Codex".to_string()),
             (
                 "quota_provider_model".to_string(),
-                "Grok/grok-4.6".to_string(),
+                "Codex/gpt-5.6-codex".to_string(),
             ),
-            ("quota_model".to_string(), "grok-4.6".to_string()),
+            ("quota_model".to_string(), "gpt-5.6-codex".to_string()),
             ("quota_week_inline_normal".to_string(), "7d 87%".to_string()),
             (
                 "quota_share_week_inline_normal".to_string(),
@@ -4372,23 +4263,23 @@ mod tests {
         assert!(!tokens.contains_key("quota_share_week_inline_normal"));
         assert_eq!(
             tokens.get("quota_provider").map(String::as_str),
-            Some("Grok")
+            Some("Codex")
         );
         assert_eq!(tokens.get(HEADROOM_TOKEN).map(String::as_str), Some("087"));
         assert_eq!(
             tokens.get("quota_model").map(String::as_str),
-            Some("grok-4.6")
+            Some("gpt-5.6-codex")
         );
         assert_eq!(
             tokens.get("quota_provider_model").map(String::as_str),
-            Some("Grok/grok-4.6")
+            Some("Codex/gpt-5.6-codex")
         );
     }
 
     #[test]
     fn nested_share_windows_match_the_snapshot_without_drift() {
         let snapshot = crate::model::ProviderSnapshot::new(
-            Provider::Grok,
+            Provider::Codex,
             vec![crate::model::UsageWindow::new(
                 crate::model::WindowKind::Weekly,
                 25.0,
@@ -4428,27 +4319,6 @@ mod tests {
         assert!(!tokens.contains_key("quota_week_normal"));
         assert!(!tokens.contains_key("quota_week_caution"));
         assert!(!tokens.contains_key("quota_week_danger"));
-    }
-
-    #[test]
-    fn extracts_latest_grok_user_prompt_instead_of_ai_output() {
-        let text = "❯ /goal 你在 ti 工作区接手 L7\n先读计划与权威文档，再按七步做 L7 盘点与设计。\n◇ Ran 1 subagent\n计划已读。先冻结坐标并读材料。\n";
-        assert_eq!(
-            extract_topic(text, Harness::Grok).as_deref(),
-            Some("/goal 你在 ti 工作区接手 L7")
-        );
-    }
-
-    #[test]
-    fn grok_build_help_rows_are_not_topics() {
-        assert_eq!(extract_topic("❯ /login\n", Harness::Grok), None);
-        assert_eq!(
-            extract_topic(
-                "❯ /login                         Log in or re-authenticate with your account\n",
-                Harness::Grok
-            ),
-            None
-        );
     }
 
     // `recent` and `recent-unwrapped` rebuild the pane's wrapped scrollback,

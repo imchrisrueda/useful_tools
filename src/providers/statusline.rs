@@ -1,4 +1,4 @@
-use crate::model::{CacheTotals, CacheUsage, ContextUsage, ProviderSnapshot};
+use crate::model::{CacheTotals, CacheUsage, ContextUsage, ProviderSnapshot, ResetAt};
 use crate::providers::ProviderError;
 use serde_json::Value;
 use std::fs::File;
@@ -47,6 +47,70 @@ pub fn parse_context(
         .map(|context| context.with_cache(cache))
         .map(Some)
         .map_err(|error| ProviderError::UnsupportedResponse(error.to_string()))
+}
+
+pub fn enrich_prompt_cache(context: &mut Option<ContextUsage>, value: &Value) {
+    let Some(context) = context.as_mut() else {
+        return;
+    };
+    let Some(cache) = context.cache.as_mut() else {
+        return;
+    };
+    let Some(object) = value
+        .get("prompt_cache")
+        .or_else(|| value.get("promptCache"))
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    let warm = object.get("warm").and_then(Value::as_bool).unwrap_or(true);
+    let expires_at = object
+        .get("expires_at")
+        .or_else(|| object.get("expiresAt"))
+        .and_then(parse_expires_at);
+    match (warm, expires_at) {
+        (true, Some(expires_at)) => {
+            cache.expires_at_unix = Some(expires_at);
+            cache.ttl_seconds = object
+                .get("ttl")
+                .and_then(Value::as_str)
+                .and_then(parse_prompt_cache_ttl);
+            if let Some(ttl_seconds) = cache.ttl_seconds {
+                cache.last_activity_unix = Some(expires_at.saturating_sub(ttl_seconds));
+            }
+        }
+        _ => {
+            cache.expires_at_unix = Some(0);
+            cache.ttl_seconds = None;
+            cache.last_activity_unix = None;
+        }
+    }
+}
+
+fn parse_prompt_cache_ttl(value: &str) -> Option<u64> {
+    match value.trim() {
+        "5m" => Some(5 * 60),
+        "1h" => Some(60 * 60),
+        _ => None,
+    }
+}
+
+fn parse_expires_at(value: &Value) -> Option<u64> {
+    if value.is_null() {
+        return None;
+    }
+    value
+        .as_u64()
+        .or_else(|| {
+            let number = value.as_f64()?;
+            (number.is_finite() && number >= 0.0).then_some(number.round() as u64)
+        })
+        .or_else(|| {
+            value
+                .as_str()
+                .and_then(ResetAt::parse)
+                .map(ResetAt::unix_seconds)
+        })
 }
 
 fn parse_cache_usage(value: Option<&Value>) -> Option<CacheUsage> {
@@ -278,7 +342,7 @@ mod tests {
 
     fn snapshot_with_cache() -> ProviderSnapshot {
         ProviderSnapshot::new(
-            Provider::Claude,
+            Provider::Agy,
             vec![UsageWindow::new(WindowKind::Weekly, 10.0, None).unwrap()],
             0,
         )

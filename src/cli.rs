@@ -794,10 +794,7 @@ impl AgentSelection {
     /// New agents are appended, never inserted, so a saved complete list from
     /// an earlier build is a proper prefix of this array and can still mean
     /// "everything on" after a provider is added.
-    pub const SUPPORTED: [Harness; 2] = [
-        Harness::Codex,
-        Harness::Agy,
-    ];
+    pub const SUPPORTED: [Harness; 2] = [Harness::Codex, Harness::Agy];
 
     /// Length of the first complete list the settings pane persisted.
     pub(crate) const FIRST_PERSISTED_FULL: usize = 2;
@@ -1053,10 +1050,7 @@ mod tests {
             AgentSelection::as_stored_list(&[Harness::Codex]),
             "only,codex"
         );
-        assert_eq!(
-            AgentSelection::as_cli_list(&[Harness::Codex]),
-            "codex"
-        );
+        assert_eq!(AgentSelection::as_cli_list(&[Harness::Codex]), "codex");
     }
 
     #[test]
@@ -1076,10 +1070,7 @@ mod tests {
     fn supported_agents_are_appended_so_legacy_full_lists_stay_prefixes() {
         assert_eq!(
             &AgentSelection::SUPPORTED[..AgentSelection::FIRST_PERSISTED_FULL],
-            &[
-                Harness::Codex,
-                Harness::Agy,
-            ]
+            &[Harness::Codex, Harness::Agy,]
         );
     }
 

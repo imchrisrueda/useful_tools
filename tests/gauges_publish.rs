@@ -39,15 +39,13 @@ impl Sidebar {
                 "input_tokens":48,"cache_read_input_tokens":952,"cache_creation_input_tokens":0
             }},
             "prompt_cache": prompt_cache,
-            "rate_limits":{"five_hour":{"used_percentage":20.0},"seven_day":{"used_percentage":35.0}}
+            "quota":{"gemini-5h":{"remaining_percent":80.0},"gemini-weekly":{"remaining_percent":65.0}}
         });
-        let snapshot = herdr_agent_quota::providers::claude::parse_statusline(
-            &payload,
-            CacheStore::now_unix(),
-        )
-        .unwrap();
+        let snapshot =
+            herdr_agent_quota::providers::agy::parse_statusline(&payload, CacheStore::now_unix())
+                .unwrap();
         cache
-            .save_statusline_observation(Provider::Claude, snapshot, &payload)
+            .save_statusline_observation(Provider::Agy, snapshot, &payload)
             .unwrap();
         fs::write(
             root.join("herdr"),
@@ -79,7 +77,7 @@ esac
         fs::write(
             root.join("inventory.json"),
             serde_json::to_vec(&json!({"result":{"agents":[{
-                "agent":"claude", "pane_id":"w1:p1", "agent_status":"idle",
+                "agent":"agy", "pane_id":"w1:p1", "agent_status":"idle",
                 "agent_session":{"value":"sample-session"}, "tokens":self.tokens
             }]}}))
             .unwrap(),
@@ -88,15 +86,14 @@ esac
         fs::write(root.join("calls"), "").unwrap();
         fs::write(root.join("report"), "").unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_herdr-agent-usage"))
-            .args(["refresh", "--provider", "claude"])
+            .args(["refresh", "--provider", "agy"])
             .env("HERDR_PLUGIN_STATE_DIR", root)
             .env("HERDR_PLUGIN_CONFIG_DIR", root)
             .env("HERDR_BIN_PATH", root.join("herdr"))
             .env("HERDR_CONFIG_FILE", root.join("config.toml"))
             .env("HERDR_SOCKET_PATH", root.join("herdr.sock"))
             .env("XDG_STATE_HOME", root.join("xdg-state"))
-            .env("CLAUDE_CONFIG_DIR", root.join("claude"))
-            .env("HERDR_AGENT_QUOTA_AGENTS", "claude")
+            .env("HERDR_AGENT_QUOTA_AGENTS", "agy")
             .env("TEST_INVENTORY", root.join("inventory.json"))
             .env("TEST_CALLS", root.join("calls"))
             .env("TEST_REPORT", root.join("report"))
@@ -243,7 +240,7 @@ fn gauges_window_rows_fit_herdr_content_width_in_both_percentage_modes() {
     for style in [PercentStyle::Remaining, PercentStyle::Used] {
         for width in 18..=40 {
             let snapshot = ProviderSnapshot::new(
-                Provider::Claude,
+                Provider::Agy,
                 vec![
                     UsageWindow::new(
                         WindowKind::FiveHour,

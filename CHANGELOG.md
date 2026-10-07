@@ -8,21 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Native Windows compatibility (resolves config/state paths via `USERPROFILE`, supports Windows platform manifest).
 - Optional sidebar pacing for recurring quota windows. Enable it in the
   settings pane or with `--sidebar-pacing on` to render values such as
   `5h -6% 45 min`; the default remains the existing quota/gauge display.
 
 ### Changed
 
+- Narrowed plugin scope exclusively to **OpenAI Codex** and **Google Antigravity (Agy)**.
+- Local-first architecture: Codex usage, rate limits, models, and context are parsed directly
+  from local rollouts (`.jsonl` / `.jsonl.zst`) in `~/.codex/sessions` without external `app-server` child processes.
+  Antigravity usage is captured locally via StatusLine IPC with zero external network requests or credential storage.
+- Streamlined configuration, settings, manifest, and installers for the focused two-agent ecosystem.
 - The GitHub repository and Herdr plugin id are now
-  [`levi-qiao/herdr-agent-usage`](https://github.com/levi-qiao/herdr-agent-usage)
-  / `herdr-agent-usage`. `./install.sh` adopts config and state from
-  `herdr-agent-quota` even when Herdr has already switched the linked id, then
-  unlinks the old id if it is still listed. The first launch of the new binary
-  does the same for the state and config directories Herdr injects. Files the
-  new directory already has are kept. The previous Cursor hook script stays at
-  its old path until `./install.sh` rewrites `hooks.json`. `./uninstall.sh`
-  restores either id.
+  [`imchrisrueda/useful_tools`](https://github.com/imchrisrueda/useful_tools) / `herdr-agent-usage`.
 
 ### Fixed
 
