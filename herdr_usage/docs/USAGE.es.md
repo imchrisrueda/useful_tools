@@ -3,10 +3,10 @@
 ## Para qué sirve
 
 Este fork muestra métricas de **Codex y Antigravity (Agy)** en el panel Agent de
-Herdr: proveedor, modelo, contexto y ventanas de cuota que estén disponibles.
-Agrupa panes por Space y permite ordenar por menor cuota restante, cambiar
-porcentajes usados/restantes y activar avisos de cuota baja. Los avisos están
-apagados por defecto; cache y TTL son opcionales.
+Herdr: proveedor, modelo, permiso de sesión (modo sandbox de Codex y estado del
+sandbox de Agy), contexto y ventanas de cuota disponibles. Agrupa panes por Space y permite ordenar por
+menor cuota restante, cambiar porcentajes usados/restantes y activar avisos de
+cuota baja. Los avisos están apagados por defecto; cache y TTL son opcionales.
 
 Es útil para vigilar varias sesiones y elegir dónde continuar trabajando sin
 consultar un panel remoto desde el plugin. No calcula facturación ni proporciona
@@ -84,9 +84,9 @@ el plugin por sí solo no restaura el StatusLine anterior.
 
 | Fuente | Uso y límite |
 | --- | --- |
-| Rollouts locales Codex `.jsonl` / `.jsonl.zst` | Métricas registradas; atribución por directorio y tiempo de inicio. No consulta APIs de cuota ni `auth.json`. |
-| JSON StatusLine Agy | Lista de campos tipados y entrada acotada a 1 MiB. Observaciones por sesión; no comparte cuotas entre sesiones ni adivina un pool ambiguo. |
-| Herdr local, CLI y socket Unix/named pipe Windows | Inventario, metadatos, foco y presentación. No lee salida de terminal. |
+| Rollouts locales Codex `.jsonl` / `.jsonl.zst` | Métricas registradas; modelo, contexto, cuota y modo de permisos sandbox (`read-only`, `workspace-write`, `full-access`, `external-sandbox`). Atribución por directorio y tiempo de inicio. No consulta APIs de cuota ni `auth.json`. Descarta rutas o políticas privadas. |
+| JSON StatusLine Agy | Lista de campos tipados y entrada acotada a 1 MiB. Conserva solo `sandbox.enabled` para mostrar `>sandbox-on` / `>sandbox-off`; atribuye la observación a la sesión y no adivina pools ambiguos. |
+| Herdr local, CLI y socket Unix/named pipe Windows | Inventario, metadatos, foco y presentación. No lee salida de terminal. En Windows, argumentos y rutas para shells como cmd/PowerShell se escapan y entrecomillan adecuadamente solo cuando contienen espacios o metacaracteres. |
 
 Solo aparecen ventanas observadas. Un error de lectura preserva la última
 observación verificada; no fabrica cero ni convierte el dato anterior en una

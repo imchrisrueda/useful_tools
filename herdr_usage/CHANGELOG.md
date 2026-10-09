@@ -23,6 +23,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Sidebar shows the session permission below quotas as `>mode`. Codex modes
+  come from the local rollout; Agy shows only its documented sandbox enabled
+  state (`>sandbox-on` / `>sandbox-off`). Policy paths and rules are discarded.
+
 - Native Windows compatibility (resolves config/state paths via `USERPROFILE`, supports Windows platform manifest).
 - Optional sidebar pacing for recurring quota windows. Enable it in the
   settings pane or with `--sidebar-pacing on` to render values such as
@@ -76,8 +80,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   runs on every agent inventory read, so the active-turn watcher, focus, and
   sibling publishes keep that session's model and context instead of
   borrowing the newest provider-wide rollout between manual refreshes. Only
-  rollouts dated within a day of the process start are opened. Ambiguous
-  matches remain unresolved.
+  rollouts dated within a day of the process start are opened. The process
+  start window is 120 seconds to cover delayed session metadata; ambiguous
+  same-cwd matches remain unresolved.
 - OpenCode 2 sessions resolve again. OpenCode 2 keeps new sessions in
   `session_v2`/`session_message` and carries the role in the `type` column,
   neither of which the collector read: every session created after the upgrade

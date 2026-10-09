@@ -17,7 +17,7 @@ const MAX_METADATA_TOKENS: usize = 16;
 /// not free: it is compared on every refresh and it competes for Herdr's
 /// 16-token report budget. Add a name here only together with the field that
 /// fills it.
-const METADATA_TOKEN_NAMES: [&str; 52] = [
+const METADATA_TOKEN_NAMES: [&str; 53] = [
     "quota_group",
     "quota_pad",
     "quota_icon",
@@ -26,6 +26,7 @@ const METADATA_TOKEN_NAMES: [&str; 52] = [
     "quota_provider",
     "quota_model",
     "quota_provider_model",
+    "quota_permission",
     "quota_context",
     "quota_context_normal",
     "quota_context_warning",
@@ -174,13 +175,14 @@ const CONTEXT_TOKEN_NAMES: [&str; 4] = [
 /// Values that must reach the pane in the *same* report that changed them,
 /// even when the budget is tight: the identity, the live diagnostics, and the
 /// inline week variants, whose styling flips as soon as a 5h window appears.
-const ROWS_THAT_MUST_NOT_LAG: [&str; 19] = [
+const ROWS_THAT_MUST_NOT_LAG: [&str; 20] = [
     "quota_group",
     "quota_icon",
     "quota_provider",
     "quota_model",
     "quota_provider_model",
     "quota_topic",
+    "quota_permission",
     "quota_context",
     "quota_context_normal",
     "quota_context_warning",
@@ -532,8 +534,9 @@ pub fn list_agent_state() -> Result<AgentState> {
 }
 
 /// Every inventory consumer (watch, focus, sibling publish) sees the same
-/// recovered sessions. A pane left without one renders the account-level
-/// model, which belongs to whichever rollout Codex wrote last.
+/// recovered sessions. A Codex pane left without one has no provably local
+/// model, so its presentation must not borrow the latest model from another
+/// rollout.
 fn agent_state_from(value: &Value, attach: impl FnOnce(&mut [AgentPane])) -> AgentState {
     let mut panes = Vec::new();
     collect_agent_panes(value, &mut panes);
@@ -1915,6 +1918,7 @@ fn desired_tokens(
         values.quota_provider_model.clone(),
     );
     insert_optional_token(&mut tokens, "quota_model", &values.quota_model);
+    insert_optional_token(&mut tokens, "quota_permission", &values.quota_permission);
     insert_context_token(
         &mut tokens,
         &values.quota_context,

@@ -142,10 +142,10 @@ impl Adapter {
         #[cfg(windows)]
         {
             format!(
-                "\"{}\" {} --state-dir \"{}\"",
-                executable.display(),
+                "{} {} --state-dir {}",
+                windows_shell_argument(executable),
                 self.subcommand,
-                state.display()
+                windows_shell_argument(state)
             )
         }
         #[cfg(not(windows))]
@@ -187,6 +187,49 @@ impl Adapter {
         }
         let value = serde_json::from_slice(&fs::read(backup)?)?;
         Ok(Some(value))
+    }
+}
+
+#[cfg(windows)]
+fn windows_shell_argument(path: &Path) -> String {
+    let value = path.display().to_string();
+    if value
+        .chars()
+        .any(|character| character.is_whitespace() || "&|<>^()!".contains(character))
+    {
+        format!("\"{value}\"")
+    } else {
+        value
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_command_tests {
+    use super::windows_shell_argument;
+    use std::path::Path;
+
+    #[test]
+    fn leaves_simple_executable_paths_unquoted_for_cmd() {
+        assert_eq!(
+            windows_shell_argument(Path::new(r"C:\tools\herdr-agent-usage.exe")),
+            r"C:\tools\herdr-agent-usage.exe"
+        );
+    }
+
+    #[test]
+    fn quotes_windows_paths_that_contain_spaces() {
+        assert_eq!(
+            windows_shell_argument(Path::new(r"C:\Program Files\herdr-agent-usage.exe")),
+            r#""C:\Program Files\herdr-agent-usage.exe""#
+        );
+    }
+
+    #[test]
+    fn quotes_windows_paths_that_contain_command_metacharacters() {
+        assert_eq!(
+            windows_shell_argument(Path::new(r"C:\tools\herdr&usage.exe")),
+            r#""C:\tools\herdr&usage.exe""#
+        );
     }
 }
 

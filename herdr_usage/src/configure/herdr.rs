@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
 
-const QUOTA_ROW_MARKERS: [&str; 68] = [
+const QUOTA_ROW_MARKERS: [&str; 69] = [
     "$quota_badge",
     "$quota_state",
     "$quota_icon",
@@ -20,6 +20,7 @@ const QUOTA_ROW_MARKERS: [&str; 68] = [
     "$quota_provider",
     "$quota_model",
     "$quota_provider_model",
+    "$quota_permission",
     "$quota_status",
     "$quota_summary",
     "$quota_session",
@@ -1023,6 +1024,7 @@ fn append_quota_rows(rows: &mut Array, layout: SidebarLayout) {
             )));
             append_cache_error_and_context_rows(rows, layout);
             append_window_rows(rows, layout);
+            append_permission_row(rows);
             append_pack_gap_row(rows);
         }
         SidebarLayout::Packed => {
@@ -1034,6 +1036,7 @@ fn append_quota_rows(rows: &mut Array, layout: SidebarLayout) {
                 Some(false),
             )));
             append_packed_quota_rows(rows);
+            append_permission_row(rows);
             append_pack_gap_row(rows);
         }
         SidebarLayout::Stacked => {
@@ -1051,9 +1054,19 @@ fn append_quota_rows(rows: &mut Array, layout: SidebarLayout) {
                 Some(false),
             )));
             append_stacked_quota_rows(rows, layout);
+            append_permission_row(rows);
             append_pack_gap_row(rows);
         }
     }
+}
+
+fn append_permission_row(rows: &mut Array) {
+    rows.push(Value::Array(styled_row(
+        "$quota_permission",
+        None,
+        Some(false),
+        Some(false),
+    )));
 }
 
 fn append_pack_gap_row(rows: &mut Array) {

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -479,6 +479,15 @@ pub struct ProviderSnapshot {
     /// pane's local rollout usage.
     #[serde(default)]
     pub session_contexts: BTreeMap<String, ContextUsage>,
+    /// Normalized Codex sandbox permission mode keyed by exact session ID.
+    /// Only allowlisted labels are stored or published; raw policy objects can
+    /// contain local paths and other machine-specific details.
+    #[serde(default)]
+    pub session_permissions: BTreeMap<String, String>,
+    /// Sessions whose latest local turn_context was inspected, including when
+    /// it had no recognized mode, so cache merging cannot revive an older one.
+    #[serde(default)]
+    pub session_permission_observations: BTreeSet<String>,
     /// StatusLine quota observations keyed by the exact provider session ID.
     /// Direct API collectors leave this map empty. Claude and Agy snapshots
     /// keep these windows conversation-local: Agy's gemini/3p allowance is an
@@ -522,6 +531,8 @@ impl ProviderSnapshot {
             session_summaries: BTreeMap::new(),
             session_models: BTreeMap::new(),
             session_contexts: BTreeMap::new(),
+            session_permissions: BTreeMap::new(),
+            session_permission_observations: BTreeSet::new(),
             session_windows: BTreeMap::new(),
             session_quota_observations: BTreeMap::new(),
             session_quota_scopes: BTreeMap::new(),
@@ -559,6 +570,7 @@ impl ProviderSnapshot {
             .keys()
             .chain(self.session_models.keys())
             .chain(self.session_contexts.keys())
+            .chain(self.session_permissions.keys())
         {
             let id = id.as_str();
             match only {
@@ -583,6 +595,7 @@ impl ProviderSnapshot {
         if self.session_windows.contains_key(session_id)
             || self.session_models.contains_key(session_id)
             || self.session_contexts.contains_key(session_id)
+            || self.session_permissions.contains_key(session_id)
         {
             return Some(session_id);
         }
@@ -633,6 +646,24 @@ impl ProviderSnapshot {
             Provider::Agy if self.only_observed_session() == Some(session_id) => {
                 self.context.as_ref()
             }
+            _ => None,
+        }
+    }
+
+    /// Return the normalized permission mode for an exact pane session.
+    pub fn permission_for_session(&self, session_id: Option<&str>) -> Option<&str> {
+        let session_id = match session_id {
+            Some(id) => self.session_for_lookup(id)?,
+            None if self.provider == Provider::Agy => self.only_observed_session()?,
+            None => return None,
+        };
+        match self.session_permissions.get(session_id)?.as_str() {
+            "read-only" | "permission: read-only" => Some(">read-only"),
+            "workspace-write" | "permission: workspace-write" => Some(">workspace-write"),
+            "full-access" | "permission: full-access" => Some(">full-access"),
+            "external-sandbox" | "permission: external-sandbox" => Some(">external-sandbox"),
+            "sandbox-on" => Some(">sandbox-on"),
+            "sandbox-off" => Some(">sandbox-off"),
             _ => None,
         }
     }

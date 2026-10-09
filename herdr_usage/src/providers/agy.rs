@@ -148,15 +148,51 @@ pub fn parse_statusline(
         enrich_prompt_cache(&mut context, value);
     }
 
-    Ok(
-        ProviderSnapshot::new(Provider::Agy, windows, fetched_at_unix)
-            // StatusLine evidence remains conversation-local in the cache.
-            // `ProviderSnapshot` only bridges a mismatched Herdr subagent id
-            // when exactly one Agy conversation is observable.
-            .session_local()
-            .with_model(model)
-            .with_context(context),
-    )
+    let mut snapshot = ProviderSnapshot::new(Provider::Agy, windows, fetched_at_unix)
+        // StatusLine evidence remains conversation-local in the cache.
+        // `ProviderSnapshot` only bridges a mismatched Herdr subagent id
+        // when exactly one Agy conversation is observable.
+        .session_local()
+        .with_model(model)
+        .with_context(context);
+    if let (Some(session_id), Some(permission)) = (
+        statusline_session_id(value),
+        parse_sandbox_permission(value),
+    ) {
+        snapshot
+            .session_permissions
+            .insert(session_id.to_string(), permission);
+    }
+    Ok(snapshot)
+}
+
+fn statusline_session_id(value: &Value) -> Option<&str> {
+    [
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "conversationId",
+    ]
+    .into_iter()
+    .find_map(|key| value.get(key).and_then(Value::as_str))
+    .filter(|value| !value.is_empty())
+}
+
+/// The documented StatusLine payload gives the active session's sandbox
+/// enabled state, but not its rule lists or a named permission preset. Keep
+/// that distinction explicit and do not infer approval policy from it.
+fn parse_sandbox_permission(value: &Value) -> Option<String> {
+    value
+        .get("sandbox")?
+        .get("enabled")?
+        .as_bool()
+        .map(|enabled| {
+            if enabled {
+                "sandbox-on".to_string()
+            } else {
+                "sandbox-off".to_string()
+            }
+        })
 }
 
 fn parse_window(
@@ -208,7 +244,7 @@ fn parse_reset(value: &Value, fetched_at_unix: u64) -> Option<ResetAt> {
 /// The scale comes from the key, never from the value. Inferring it from the
 /// magnitude reads a `remaining_percent` of `1.0` as a full pool instead of a
 /// nearly exhausted one — the same 100x error, in the same dangerous
-/// direction, that [`crate::providers::opencode_go`] exists to avoid.
+/// direction, which can turn a nearly exhausted pool into an apparently full one.
 fn parse_remaining(value: &Value) -> Option<f64> {
     let object = value.as_object()?;
     let (raw, per_unit) = FRACTION_KEYS
@@ -329,6 +365,45 @@ mod tests {
         });
         let snapshot = parse_statusline(&value, 1).unwrap();
         assert_eq!(snapshot.model.as_deref(), Some("Gemini Flash"));
+    }
+
+    #[test]
+    fn parses_only_the_documented_session_sandbox_enabled_flag() {
+        let value = json!({
+            "session_id": "pane-1",
+            "sandbox": {"enabled": true, "allow_network": true},
+            "quota": {"gemini-weekly": {"remaining_fraction": 0.8}}
+        });
+        let snapshot = parse_statusline(&value, 1).unwrap();
+        assert_eq!(
+            snapshot
+                .session_permissions
+                .get("pane-1")
+                .map(String::as_str),
+            Some("sandbox-on")
+        );
+        assert_eq!(snapshot.permission_for_session(None), Some(">sandbox-on"));
+
+        let disabled = json!({
+            "session_id": "pane-2",
+            "sandbox": {"enabled": false},
+            "quota": {"gemini-weekly": {"remaining_fraction": 0.8}}
+        });
+        let snapshot = parse_statusline(&disabled, 1).unwrap();
+        assert_eq!(
+            snapshot.permission_for_session(Some("pane-2")),
+            Some(">sandbox-off")
+        );
+    }
+
+    #[test]
+    fn does_not_guess_agy_permission_when_sandbox_state_is_missing() {
+        let value = json!({
+            "session_id": "pane-1",
+            "quota": {"gemini-weekly": {"remaining_fraction": 0.8}}
+        });
+        let snapshot = parse_statusline(&value, 1).unwrap();
+        assert_eq!(snapshot.permission_for_session(Some("pane-1")), None);
     }
 
     #[test]

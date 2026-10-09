@@ -143,6 +143,8 @@ pub struct MetadataTokens {
     pub quota_week_severity: Option<Severity>,
     pub quota_month: String,
     pub quota_month_severity: Option<Severity>,
+    /// Coarse permission mode for this exact session, if locally known.
+    pub quota_permission: String,
     pub quota_context: String,
     /// Read from context *left*, on the same bands as the window severities,
     /// whichever side of the ledger the row prints. Only `gauges` renders it.
@@ -249,6 +251,7 @@ impl MetadataTokens {
     ) -> Self {
         let quota_model = match session_id {
             Some(session_id) => snapshot.model_for_session(Some(session_id)),
+            None if snapshot.provider == Provider::Codex && snapshot.session_quota_only => None,
             None => snapshot.model.as_deref(),
         };
         let context =
@@ -281,6 +284,10 @@ impl MetadataTokens {
         let live = live_windows(windows, now_unix);
         let windows = live.as_slice();
         let quota_provider = snapshot.provider.display_name().to_string();
+        let quota_permission = snapshot
+            .permission_for_session(session_id)
+            .unwrap_or_default()
+            .to_string();
         let quota_model = model.unwrap_or_default().to_string();
         let quota_provider_model =
             provider_model_label(&quota_provider, &quota_model, shape.content_width);
@@ -352,6 +359,7 @@ impl MetadataTokens {
                     Severity::for_window(window, now_unix)
                 }
             }),
+            quota_permission,
             quota_context: sidebar_context(context, style, shape),
             quota_context_severity: context.map(|context| context_severity(context, style)),
             quota_cache: sidebar_cache(context),
@@ -385,6 +393,7 @@ impl MetadataTokens {
             quota_week_severity: None,
             quota_month: String::new(),
             quota_month_severity: None,
+            quota_permission: String::new(),
             quota_context: String::new(),
             quota_context_severity: None,
             quota_cache: String::new(),
@@ -1337,6 +1346,79 @@ mod tests {
             .quota_context,
             ""
         );
+    }
+
+    #[test]
+    fn codex_pane_without_session_id_does_not_borrow_another_rollouts_model() {
+        let snapshot = ProviderSnapshot::new(Provider::Codex, vec![], 0)
+            .session_local()
+            .with_model(Some("gpt-6.1-sol".to_string()));
+        let values = MetadataTokens::from_snapshot_for_pane(
+            &snapshot,
+            0,
+            None,
+            PercentStyle::default(),
+            SidebarShape::default(),
+        );
+        assert_eq!(values.quota_model, "");
+        assert_eq!(values.quota_provider_model, "Codex");
+    }
+
+    #[test]
+    fn permission_is_pane_session_local_and_normalized() {
+        let mut snapshot = ProviderSnapshot::new(Provider::Codex, vec![], 0).session_local();
+        snapshot
+            .session_permissions
+            .insert("session-a".to_string(), "workspace-write".to_string());
+        snapshot.session_permissions.insert(
+            "session-secret".to_string(),
+            "C:/private/path and credential=secret".to_string(),
+        );
+        let a = MetadataTokens::from_snapshot_for_pane(
+            &snapshot,
+            0,
+            Some("session-a"),
+            PercentStyle::default(),
+            SidebarShape::default(),
+        );
+        let b = MetadataTokens::from_snapshot_for_pane(
+            &snapshot,
+            0,
+            Some("session-b"),
+            PercentStyle::default(),
+            SidebarShape::default(),
+        );
+        let secret = MetadataTokens::from_snapshot_for_pane(
+            &snapshot,
+            0,
+            Some("session-secret"),
+            PercentStyle::default(),
+            SidebarShape::default(),
+        );
+        assert_eq!(a.quota_permission, ">workspace-write");
+        assert_eq!(b.quota_permission, "");
+        assert_eq!(secret.quota_permission, "");
+    }
+
+    #[test]
+    fn agy_sandbox_state_renders_without_a_matching_herdr_session_id() {
+        let snapshot = crate::providers::agy::parse_statusline(
+            &serde_json::json!({
+                "session_id": "agy-pane",
+                "sandbox": {"enabled": true},
+                "quota": {"gemini-weekly": {"remaining_fraction": 0.8}}
+            }),
+            1,
+        )
+        .unwrap();
+        let values = MetadataTokens::from_snapshot_for_pane(
+            &snapshot,
+            1,
+            None,
+            PercentStyle::default(),
+            SidebarShape::default(),
+        );
+        assert_eq!(values.quota_permission, ">sandbox-on");
     }
 
     #[test]

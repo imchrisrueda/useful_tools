@@ -27,8 +27,9 @@ Labels are three characters so those periods align; a provider-named window too
 long for that column keeps a plain row instead of a truncated bar. Meters size
 to the connected Herdr endpoint's sidebar — indent and scrollbar included.
 Empty fields collapse; percentages can show remaining or used quota. Cache and
-TTL are off by default (turn them on in settings if you want them). Codex
-keeps every tab visible in the Agent panel; duplicate 5h/7d/30d rows collapse to
+TTL are off by default (turn them on in settings if you want them). Codex and
+Agy show the session permission state (e.g. `>workspace-write` or `>sandbox-on`),
+and every tab stays visible in the Agent panel; duplicate 5h/7d/30d rows collapse to
 one pane per Space. On a wide sidebar, the vendor icon and name sit above that
 pane's quota, and extra tabs list model and context with no icon. A settings
 row gap of 1 still separates different agents; nested extra tabs of the same vendor
@@ -215,8 +216,8 @@ normal quota percentage instead of guessing.
 
 | Agent | Quota source | Attribution |
 | --- | --- | --- |
-| Codex | Local rollouts JSONL/.zst; 5h and/or 7d | Local session windows in `~/.codex/sessions` |
-| Agy / Antigravity | StatusLine JSON payload; 5h, 7d, and api (third-party pool on Gemini) | Exact session and identifiable model pool |
+| Codex | Local rollouts JSONL/.zst; 5h and/or 7d quota windows, model, context, and sandbox permission mode | Local session windows in `~/.codex/sessions` (only allowlisted permission labels like `read-only`, `workspace-write`, `full-access`, `external-sandbox` are retained; local paths/policies are discarded) |
+| Agy / Antigravity | StatusLine JSON payload; 5h, 7d, api (third-party pool on Gemini), and sandbox enabled state | Exact session and identifiable model pool; only the documented `sandbox.enabled` boolean is retained for permission display |
 
 Agy / Antigravity supplies local StatusLine metrics for the sidebar. Its collector
 is silent and does not execute a previous StatusLine command; that command is

@@ -166,7 +166,10 @@ pub fn local_snapshot_at(home: &Path, session_ids: &[String], now_unix: u64) -> 
     snapshot
 }
 
-const PROCESS_SESSION_START_TOLERANCE_SECONDS: u64 = 90;
+// On this machine the rollout's first timestamp preceded the foreground
+// Codex process by 107 seconds. Keep the window short, and still fail closed
+// when more than one same-cwd rollout could match.
+const PROCESS_SESSION_START_TOLERANCE_SECONDS: u64 = 120;
 
 /// Bind missing Herdr sessions by a Codex process start time as well as the
 /// rollout's exact cwd. Treehouse worktrees can be reused, so cwd alone is
@@ -325,6 +328,16 @@ fn enrich_local_sessions_at(snapshot: &mut ProviderSnapshot, home: &Path, sessio
         if let Some(model) = observation.model.clone() {
             snapshot.session_models.insert(session_id.clone(), model);
         }
+        if let Some(permission) = observation.permission {
+            snapshot
+                .session_permissions
+                .insert(session_id.clone(), permission);
+        }
+        if observation.permission_observed {
+            snapshot
+                .session_permission_observations
+                .insert(session_id.clone());
+        }
         if !observation.windows.is_empty() {
             snapshot
                 .session_windows
@@ -411,6 +424,8 @@ fn find_rollout_paths(home: &Path, session_ids: &[String]) -> BTreeMap<String, P
 #[derive(Debug, Clone, Default)]
 struct RolloutObservation {
     model: Option<String>,
+    permission: Option<String>,
+    permission_observed: bool,
     context: Option<ContextUsage>,
     windows: Vec<UsageWindow>,
 }
@@ -474,13 +489,19 @@ fn read_rollout_observation(path: &Path, session_id: &str) -> Option<RolloutObse
         text.split_once('\n')?.1.to_string()
     };
     let mut observation = parse_rollout_observation(&text, session_id)?;
-    if observation.model.is_none() {
-        // The tail is live token_count / tool output. The latest model sits
-        // further back, at the start of this turn. Never fall back to the
-        // file head: that is the first turn's model, not the current one.
-        observation.model = read_latest_rollout_model(path);
+    // A turn_context can be older than the diagnostic tail, and a prior turn's
+    // context can still be inside that tail. Resolve the newest one from the
+    // bounded reverse scan so both fields describe the same current turn.
+    if let Some(payload) = read_latest_rollout_turn_context(path) {
+        observation.model = parse_model_payload(&payload);
+        observation.permission = parse_permission_payload(&payload);
+        observation.permission_observed = true;
+    } else {
+        observation.model = None;
+        observation.permission = None;
     }
     if observation.model.is_none()
+        && observation.permission.is_none()
         && observation.context.is_none()
         && observation.windows.is_empty()
     {
@@ -489,10 +510,10 @@ fn read_rollout_observation(path: &Path, session_id: &str) -> Option<RolloutObse
     Some(observation)
 }
 
-/// Walk the rollout newest-first in tail-sized chunks until a `turn_context`
-/// model is found, stopping at [`ROLLOUT_MODEL_SCAN_BYTES`]. Adjacent chunks
+/// Walk the rollout newest-first in tail-sized chunks until the latest
+/// `turn_context` is found, stopping at [`ROLLOUT_MODEL_SCAN_BYTES`]. Adjacent chunks
 /// overlap so a `turn_context` that straddles a boundary is still parsed.
-fn read_latest_rollout_model(path: &Path) -> Option<String> {
+fn read_latest_rollout_turn_context(path: &Path) -> Option<Value> {
     let mut file = fs::File::open(path).ok()?;
     let length = file.metadata().ok()?.len();
     if length == 0 {
@@ -525,8 +546,8 @@ fn read_latest_rollout_model(path: &Path) -> Option<String> {
         if cursor < length && !slice.is_empty() && !slice.ends_with('\n') {
             slice = slice.rsplit_once('\n').map(|(rest, _)| rest).unwrap_or("");
         }
-        if let Some(model) = parse_rollout_model(slice) {
-            return Some(model);
+        if let Some(payload) = parse_latest_turn_context_payload(slice) {
+            return Some(payload);
         }
         let Some(next) = next_reverse_cursor(start, cursor, floor) else {
             break;
@@ -546,6 +567,8 @@ fn next_reverse_cursor(start: u64, cursor: u64, floor: u64) -> Option<u64> {
 
 fn parse_rollout_observation(text: &str, session_id: &str) -> Option<RolloutObservation> {
     let mut model = None;
+    let mut permission = None;
+    let mut permission_observed = false;
     let mut context = None;
     let mut windows = Vec::new();
     for line in text.lines() {
@@ -555,6 +578,10 @@ fn parse_rollout_observation(text: &str, session_id: &str) -> Option<RolloutObse
         if entry.get("type").and_then(Value::as_str) == Some("turn_context") {
             let payload = entry.get("payload").unwrap_or(&entry);
             model = parse_model_payload(payload).or(model);
+            // Missing or unsupported permissions in the newest context must
+            // clear older modes rather than make them look current.
+            permission = parse_permission_payload(payload);
+            permission_observed = true;
             continue;
         }
         if entry.get("type").and_then(Value::as_str) != Some("event_msg") {
@@ -624,9 +651,36 @@ fn parse_rollout_observation(text: &str, session_id: &str) -> Option<RolloutObse
     }
     Some(RolloutObservation {
         model,
+        permission,
+        permission_observed,
         context,
         windows,
     })
+}
+
+/// Keep only coarse sandbox modes. Policy paths, network settings, and other
+/// rollout details are intentionally discarded before cache or publication.
+fn parse_permission_payload(payload: &Value) -> Option<String> {
+    let policy = payload
+        .get("sandbox_policy")
+        .or_else(|| payload.get("sandboxPolicy"))?;
+    let kind = policy
+        .get("type")
+        .and_then(Value::as_str)
+        .or_else(|| policy.as_str())?;
+    match kind {
+        "readOnly" | "read_only" | "read-only" => Some("read-only".to_string()),
+        "workspaceWrite" | "workspace_write" | "workspace-write" => {
+            Some("workspace-write".to_string())
+        }
+        "dangerFullAccess" | "danger_full_access" | "danger-full-access" => {
+            Some("full-access".to_string())
+        }
+        "externalSandbox" | "external_sandbox" | "external-sandbox" => {
+            Some("external-sandbox".to_string())
+        }
+        _ => None,
+    }
 }
 
 fn parse_rollout_timestamp(entry: &Value) -> Option<u64> {
@@ -637,12 +691,11 @@ fn parse_rollout_timestamp(entry: &Value) -> Option<u64> {
         .map(ResetAt::unix_seconds)
 }
 
-fn parse_rollout_model(text: &str) -> Option<String> {
+fn parse_latest_turn_context_payload(text: &str) -> Option<Value> {
     text.lines().rev().find_map(|line| {
         let entry = serde_json::from_str::<Value>(line).ok()?;
         (entry.get("type").and_then(Value::as_str) == Some("turn_context"))
-            .then(|| parse_model_payload(entry.get("payload").unwrap_or(&entry)))
-            .flatten()
+            .then(|| entry.get("payload").unwrap_or(&entry).clone())
     })
 }
 
@@ -869,6 +922,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_only_allowlisted_permission_modes_and_discards_policy_details() {
+        let text = r#"{"type":"turn_context","payload":{"model":"gpt-5.6","sandbox_policy":{"type":"workspaceWrite","writable_roots":["C:/private/project"],"network_access":true,"credential":"secret"}}}"#;
+        let observation = parse_rollout_observation(text, "session-1").unwrap();
+        assert_eq!(observation.permission.as_deref(), Some("workspace-write"));
+        let serialized = serde_json::to_string(&observation.permission).unwrap();
+        assert!(!serialized.contains("private"));
+        assert!(!serialized.contains("secret"));
+
+        assert_eq!(
+            parse_permission_payload(
+                &json!({"sandbox_policy":{"type":"unknown","path":"private"}})
+            ),
+            None
+        );
+
+        let newer_without_policy = parse_rollout_observation(
+            "{\"type\":\"turn_context\",\"payload\":{\"sandbox_policy\":{\"type\":\"workspaceWrite\"}}}\n{\"type\":\"turn_context\",\"payload\":{\"model\":\"new-turn\"}}",
+            "session-1",
+        )
+        .unwrap();
+        assert_eq!(newer_without_policy.permission, None);
+    }
+
+    #[test]
     fn rollout_cache_without_a_timestamp_has_no_ttl_estimate() {
         let observation = parse_rollout_observation(
             &format!(
@@ -957,6 +1034,24 @@ mod tests {
                 "/treehouse/reused".to_string(),
                 1_790_083_002,
             )],
+        );
+        assert_eq!(resolved.get("w1:p1").map(String::as_str), Some("live"));
+    }
+
+    #[test]
+    fn resolves_one_same_cwd_rollout_when_metadata_is_107_seconds_older() {
+        let directory = tempfile::tempdir().unwrap();
+        write_session_meta(
+            directory.path(),
+            "2026/09/22",
+            "2026-09-22T11-35-08",
+            "live",
+            "/workspace",
+            "2026-09-22T17:35:08Z",
+        );
+        let resolved = session_ids_for_panes_at(
+            directory.path(),
+            &[("w1:p1".to_string(), "/workspace".to_string(), 1_790_098_615)],
         );
         assert_eq!(resolved.get("w1:p1").map(String::as_str), Some("live"));
     }
@@ -1211,9 +1306,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let pad = token_count_pad_line();
         let mut body = String::new();
-        body.push_str("{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-6-astra\"}}\n");
+        body.push_str("{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-6-astra\",\"sandbox_policy\":{\"type\":\"readOnly\"}}}\n");
         pad_jsonl(&mut body, ROLLOUT_TAIL_BYTES as usize + pad.len(), &pad);
-        body.push_str("{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}\n");
+        body.push_str("{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\",\"sandbox_policy\":{\"type\":\"workspaceWrite\",\"writableRoots\":[\"C:/private\"]}}}\n");
         let tail_floor = body.len() + ROLLOUT_TAIL_BYTES as usize + pad.len();
         pad_jsonl(&mut body, tail_floor, &pad);
         write_padded_rollout(
@@ -1230,6 +1325,13 @@ mod tests {
             Some("gpt-5.6-sol")
         );
         assert_eq!(snapshot.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(
+            snapshot
+                .session_permissions
+                .get("session-1")
+                .map(String::as_str),
+            Some("workspace-write")
+        );
         assert!(snapshot.session_contexts.contains_key("session-1"));
     }
 

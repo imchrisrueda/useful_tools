@@ -136,6 +136,7 @@ mod tests {
             "messages": [{"role": "user", "content": "secret password"}],
             "api_key": "secret-key-12345",
             "unknown_metadata": {"internal_env": "production"},
+            "sandbox": {"enabled": true, "allow_network": false, "permissions": ["private"]},
             "model": {"display_name": "Gemini 2.5 Pro"},
             "quota": {
                 "gemini-5h": {"remaining_fraction": 0.85, "reset_in_seconds": 3600},
@@ -182,6 +183,20 @@ mod tests {
         assert!(cached.get("messages").is_none());
         assert!(cached.get("api_key").is_none());
         assert!(cached.get("unknown_metadata").is_none());
+        assert_eq!(
+            cached
+                .get("sandbox")
+                .and_then(|sandbox| sandbox.get("enabled")),
+            Some(&Value::Bool(true))
+        );
+        assert!(cached
+            .get("sandbox")
+            .and_then(|sandbox| sandbox.get("allow_network"))
+            .is_none());
+        assert!(cached
+            .get("sandbox")
+            .and_then(|sandbox| sandbox.get("permissions"))
+            .is_none());
         assert!(cached
             .get("quota")
             .and_then(|q| q.get("secret_pool"))

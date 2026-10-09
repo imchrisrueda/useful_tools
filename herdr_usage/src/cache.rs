@@ -216,6 +216,25 @@ impl CacheStore {
                 for (session_id, model) in previous.session_models {
                     snapshot.session_models.entry(session_id).or_insert(model);
                 }
+                for (session_id, permission) in previous.session_permissions {
+                    if !snapshot
+                        .session_permission_observations
+                        .contains(&session_id)
+                    {
+                        snapshot
+                            .session_permissions
+                            .entry(session_id)
+                            .or_insert(permission);
+                    }
+                }
+                for session_id in previous.session_permission_observations {
+                    if !snapshot
+                        .session_permission_observations
+                        .contains(&session_id)
+                    {
+                        snapshot.session_permission_observations.insert(session_id);
+                    }
+                }
                 // Provider-level values speak for a pane whose session Herdr
                 // could not identify, so they are only inherited by a refresh
                 // that spoke for every session too.
@@ -319,6 +338,12 @@ impl CacheStore {
             session_id,
         );
         if let Some(previous_snapshot) = previous_snapshot {
+            for (session_id, permission) in &previous_snapshot.session_permissions {
+                snapshot
+                    .session_permissions
+                    .entry(session_id.clone())
+                    .or_insert_with(|| permission.clone());
+            }
             for (session_id, context) in &previous_snapshot.session_contexts {
                 snapshot
                     .session_contexts
@@ -1321,6 +1346,10 @@ fn previous_windows_for_merge<'a>(
 fn prune_session_diagnostics(snapshot: &mut ProviderSnapshot, current_session_ids: &[String]) {
     prune_session_map(&mut snapshot.session_models, current_session_ids);
     prune_session_map(&mut snapshot.session_contexts, current_session_ids);
+    prune_session_map(&mut snapshot.session_permissions, current_session_ids);
+    snapshot
+        .session_permission_observations
+        .retain(|session_id| current_session_ids.iter().any(|id| id == session_id));
     prune_session_map(&mut snapshot.session_windows, current_session_ids);
     prune_session_map(
         &mut snapshot.session_quota_observations,
@@ -1519,6 +1548,19 @@ pub fn sanitize_statusline_payload(value: &Value) -> Value {
     }
 
     // Cache lifetime only. Never copy an open-ended object or a transcript path.
+    // Antigravity's sandbox is allowlisted as a single boolean; network flags
+    // and any future nested policy fields are deliberately not retained.
+    if let Some(enabled) = source
+        .get("sandbox")
+        .and_then(|sandbox| sandbox.get("enabled"))
+        .and_then(Value::as_bool)
+    {
+        clean.insert(
+            "sandbox".to_string(),
+            serde_json::json!({"enabled": enabled}),
+        );
+    }
+
     for key in &["prompt_cache", "promptCache"] {
         if let Some(object) = source.get(*key).and_then(Value::as_object) {
             let mut cache = serde_json::Map::new();
@@ -1706,19 +1748,23 @@ mod tests {
     fn statusline_observations_keep_models_for_multiple_sessions() {
         let directory = tempdir().unwrap();
         let cache = CacheStore::new(directory.path());
+        let mut first =
+            ProviderSnapshot::new(Provider::Agy, vec![], 1).with_model(Some("Sonnet".to_string()));
+        first
+            .session_permissions
+            .insert("session-1".to_string(), "sandbox-on".to_string());
         cache
-            .save_statusline_observation(
-                Provider::Agy,
-                ProviderSnapshot::new(Provider::Agy, vec![], 1)
-                    .with_model(Some("Sonnet".to_string())),
-                &json!({"session_id": "session-1"}),
-            )
+            .save_statusline_observation(Provider::Agy, first, &json!({"session_id": "session-1"}))
             .unwrap();
+        let mut second =
+            ProviderSnapshot::new(Provider::Agy, vec![], 2).with_model(Some("Opus".to_string()));
+        second
+            .session_permissions
+            .insert("session-2".to_string(), "sandbox-off".to_string());
         cache
             .save_statusline_observation(
                 Provider::Agy,
-                ProviderSnapshot::new(Provider::Agy, vec![], 2)
-                    .with_model(Some("Opus".to_string())),
+                second,
                 &json!({"conversation_id": "session-2"}),
             )
             .unwrap();
@@ -1737,6 +1783,8 @@ mod tests {
             .snapshot;
         assert_eq!(saved.session_models["session-1"], "Sonnet");
         assert_eq!(saved.session_models["session-2"], "Opus");
+        assert_eq!(saved.session_permissions["session-1"], "sandbox-on");
+        assert_eq!(saved.session_permissions["session-2"], "sandbox-off");
     }
 
     #[test]
@@ -2627,6 +2675,32 @@ mod tests {
     }
 
     #[test]
+    fn inspected_permission_without_a_known_mode_clears_the_cached_mode() {
+        let directory = tempdir().unwrap();
+        let cache = CacheStore::new(directory.path());
+        let mut previous = snapshot();
+        previous
+            .session_permissions
+            .insert("session-1".to_string(), "workspace-write".to_string());
+        previous
+            .session_permission_observations
+            .insert("session-1".to_string());
+        cache.save(&previous).unwrap();
+
+        let mut latest = snapshot();
+        latest
+            .session_permission_observations
+            .insert("session-1".to_string());
+        cache
+            .save_preserving_diagnostics_for_sessions(&mut latest, &["session-1".to_string()], None)
+            .unwrap();
+
+        let saved = cache.load(Provider::Codex).unwrap().unwrap();
+        assert!(!saved.session_permissions.contains_key("session-1"));
+        assert_eq!(saved.permission_for_session(Some("session-1")), None);
+    }
+
+    #[test]
     fn direct_provider_refresh_does_not_leak_global_context_to_a_new_session() {
         let directory = tempdir().unwrap();
         let cache = CacheStore::new(directory.path());
@@ -3252,6 +3326,7 @@ mod tests {
             "user_prompt": "classified source code",
             "history": ["turn 1", "turn 2"],
             "bearer_token": "token-xyz",
+            "sandbox": {"enabled": true, "allow_network": true, "private_policy": "secret"},
             "model": {"display_name": "Gemini 2.5 Flash"},
             "quota": {
                 "gemini-5h": {"remaining_fraction": 0.9, "reset_in_seconds": 1800},
@@ -3280,6 +3355,20 @@ mod tests {
         assert!(payload.get("user_prompt").is_none());
         assert!(payload.get("history").is_none());
         assert!(payload.get("bearer_token").is_none());
+        assert_eq!(
+            payload
+                .get("sandbox")
+                .and_then(|sandbox| sandbox.get("enabled")),
+            Some(&Value::Bool(true))
+        );
+        assert!(payload
+            .get("sandbox")
+            .and_then(|sandbox| sandbox.get("allow_network"))
+            .is_none());
+        assert!(payload
+            .get("sandbox")
+            .and_then(|sandbox| sandbox.get("private_policy"))
+            .is_none());
         assert!(payload
             .get("quota")
             .and_then(|q| q.get("leak_bucket"))
