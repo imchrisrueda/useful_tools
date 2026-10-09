@@ -1,0 +1,58 @@
+# Contributing
+
+Bug reports should include the plugin and CLI versions, reproduction steps,
+and redacted expected/actual output. Never include credentials or private
+session content. Report vulnerabilities through [SECURITY.md](SECURITY.md).
+
+## Development
+
+Run the commands below from `herdr_usage/`. Use the toolchain pinned in `rust-toolchain.toml`. Tests use local fixtures and
+stubs; installing the plugin into a running Herdr session is optional.
+
+```sh
+python3 scripts/security_audit.py
+cargo fmt --all -- --check
+cargo test --all-targets --all-features --locked
+cargo clippy --release --all-targets --all-features --locked -- -D warnings
+cargo build --release --locked
+```
+
+CI validates Linux and macOS, the plugin manifest, and dependency advisories.
+Timing-sensitive tests can be diagnosed with `-- --test-threads=1`.
+
+## Design requirements
+
+- Use local, verified observations and synthetic fixtures. Runtime must not read
+  credential stores, contact remote endpoints or run provider/user shell commands.
+- Match quota to its credential or session evidence. A missing identity is not
+  permission to reuse another account's cache. Preserve failed readings only
+  when that attribution is still valid.
+- No entry point may read terminal output or publish prompt topics/session summaries. Publish once and suppress unchanged
+  metadata; include new tokens in the metadata comparison set.
+- Keep one bounded watcher for all supported harnesses. Fetch active or
+  settling billing targets, and any target whose cached windows have expired,
+  retain upstream cache limits, and test completion inside a debounce window.
+- Preserve user configuration and existing preferences during upgrades.
+  Installation, repair, and uninstall must be repeatable and reversible.
+  Test migration from older caches and a watcher using an old Herdr client.
+- Do not collect credentials. Agy payloads need a typed allowlist at ingestion and
+  persistence. Preserve previous StatusLine settings for uninstall without executing them.
+
+A harness and a billing provider are different concepts. Add a subscription
+route only when the credential source is verified; use session diagnostics
+without quota for unsupported or unconfirmed routes. When adding a harness,
+append it to `AgentSelection::SUPPORTED` and follow the checklist in
+[AGENTS.md](AGENTS.md#adding-a-harness) — a saved complete agent list is a
+prefix of that array, and inserting or forgetting the settings height, sidebar
+style, or `SUPPORTED`-driven tests recreates #81.
+
+## Pull requests and documentation
+
+Describe the user-visible problem, resulting behavior, and validation. Include
+regression tests that exercise the actual caller path. Use conventional commit
+prefixes such as `fix:`, `feat:`, and `docs:`.
+
+Keep both READMEs aligned and concise. Record user-facing changes in
+`CHANGELOG.md`; keep internal task plans out of public documentation. Historical
+research belongs under `docs/research/` with dates and source links. See
+[AGENTS.md](AGENTS.md) for repository-specific implementation constraints.

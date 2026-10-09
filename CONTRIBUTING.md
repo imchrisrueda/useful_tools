@@ -1,58 +1,24 @@
-# Contributing
+# Contribuir a useful_tools
 
-Bug reports should include the plugin and CLI versions, reproduction steps,
-and redacted expected/actual output. Never include credentials or private
-session content. Report vulnerabilities through [SECURITY.md](SECURITY.md).
+Identifica el componente afectado y consulta su README e instrucciones locales.
+Describe el problema, el comportamiento resultante y las comprobaciones realizadas.
+No incluyas credenciales ni contenido privado de sesiones en commits, issues o logs.
 
-## Development
+## Herramientas
 
-Use the toolchain pinned in `rust-toolchain.toml`. Tests use local fixtures and
-stubs; installing the plugin into a running Herdr session is optional.
+Cada herramienta vive en su propio directorio con documentación, dependencias y tests.
+Para Herdr, consulta [herdr_usage/CONTRIBUTING.md](herdr_usage/CONTRIBUTING.md)
+y ejecuta los comandos desde `herdr_usage/` con su toolchain fijado.
 
-```sh
-cargo fmt --all -- --check
-cargo test --all-targets --all-features --locked
-cargo clippy --release --all-targets --all-features --locked -- -D warnings
-cargo build --release --locked
-```
+## Skills y procedimientos
 
-CI validates Linux and macOS, the plugin manifest, and dependency advisories.
-Timing-sensitive tests can be diagnosed with `-- --test-threads=1`.
+Sigue las convenciones de [skills/](skills/README.md) y
+[procedures/](procedures/README.md). Documenta requisitos, alcance, ejemplos y
+una condición observable de éxito. Enlaza recursos existentes cuando sean específicos
+de una herramienta.
 
-## Design requirements
+## Cambios compartidos
 
-- Use verified CLI contracts or local observations. Keep parsing separate from
-  credential and network I/O; add redacted fixtures for each supported shape.
-- Match quota to its credential or session evidence. A missing identity is not
-  permission to reuse another account's cache. Preserve failed readings only
-  when that attribution is still valid.
-- Read only the named pane's visible screen on an event. Watch, refresh, and
-  startup must not read terminal output. Publish once and suppress unchanged
-  metadata; include new tokens in the metadata comparison set.
-- Keep one bounded watcher for all supported harnesses. Fetch active or
-  settling billing targets, and any target whose cached windows have expired,
-  retain upstream cache limits, and test completion inside a debounce window.
-- Preserve user configuration and existing preferences during upgrades.
-  Installation, repair, and uninstall must be repeatable and reversible.
-  Test migration from older caches and a watcher using an old Herdr client.
-- Handle credentials in memory only. The plugin does not manage provider
-  logins; an invoked CLI retains responsibility for its own credential lifecycle.
-
-A harness and a billing provider are different concepts. Add a subscription
-route only when the credential source is verified; use session diagnostics
-without quota for unsupported or unconfirmed routes. When adding a harness,
-append it to `AgentSelection::SUPPORTED` and follow the checklist in
-[AGENTS.md](AGENTS.md#adding-a-harness) — a saved complete agent list is a
-prefix of that array, and inserting or forgetting the settings height, sidebar
-style, or `SUPPORTED`-driven tests recreates #81.
-
-## Pull requests and documentation
-
-Describe the user-visible problem, resulting behavior, and validation. Include
-regression tests that exercise the actual caller path. Use conventional commit
-prefixes such as `fix:`, `feat:`, and `docs:`.
-
-Keep both READMEs aligned and concise. Record user-facing changes in
-`CHANGELOG.md`; keep internal task plans out of public documentation. Historical
-research belongs under `docs/research/` with dates and source links. See
-[AGENTS.md](AGENTS.md) for repository-specific implementation constraints.
+Mantén `.github/` en la raíz y especifica las rutas de cada componente en sus workflows.
+Actualiza el índice del README al añadir una herramienta. Cada componente debe indicar
+su licencia y atribuir el código o materiales derivados de otros proyectos.

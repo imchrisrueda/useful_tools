@@ -1,0 +1,126 @@
+#[test]
+fn pane_focus_uses_the_quota_only_focus_path() {
+    let manifest = include_str!("../herdr-plugin.toml");
+    let hook = manifest
+        .split("[[events]]")
+        .find(|event| event.contains("on = \"pane.focused\""))
+        .unwrap();
+    assert!(hook.contains("\"focus\"]"));
+    assert!(!hook.contains("\"event\"]"));
+}
+
+#[test]
+fn workspace_and_tab_focus_reach_the_focus_path() {
+    let manifest = include_str!("../herdr-plugin.toml");
+    for on in ["workspace.focused", "tab.focused"] {
+        let hook = manifest
+            .split("[[events]]")
+            .find(|event| event.contains(&format!("on = \"{on}\"")))
+            .expect("workspace and tab focus must be hooked");
+        assert!(hook.contains("\"focus\"]"), "{on}: {hook}");
+    }
+}
+
+#[test]
+fn plugin_exposes_one_click_configure_and_uninstall_actions() {
+    let manifest = include_str!("../herdr-plugin.toml");
+    assert!(manifest.contains("id = \"configure\""));
+    assert!(manifest.contains("\"configure\", \"--apply\", \"--reload\""));
+    assert!(manifest.contains("id = \"uninstall\""));
+    assert!(manifest.contains("\"configure\", \"--uninstall\", \"--reload\""));
+}
+
+#[test]
+fn grok_runtime_refresh_does_not_go_through_a_plugin_action() {
+    let manifest = include_str!("../herdr-plugin.toml");
+    assert!(!manifest.contains("id = \"refresh-grok\""));
+}
+
+#[test]
+fn exited_panes_do_not_trigger_a_quota_refresh() {
+    let manifest = include_str!("../herdr-plugin.toml");
+    assert!(!manifest.contains("on = \"pane.exited\""));
+}
+
+/// Settings remains a pane so it receives the plugin environment, while a
+/// small action lets a keybinding open that pane.
+#[test]
+fn settings_are_an_action_backed_by_a_plugin_pane() {
+    let manifest = include_str!("../herdr-plugin.toml");
+    let pane = manifest
+        .split("[[panes]]")
+        .find(|pane| pane.contains("id = \"settings\""))
+        .unwrap();
+    assert!(pane.contains("\"settings\"]"), "{pane}");
+    assert!(pane.contains("placement = \"popup\""), "{pane}");
+    let action = manifest
+        .split("[[actions]]")
+        .find(|action| action.contains("id = \"open-settings\""))
+        .expect("settings action");
+    assert!(action.contains("\"open-settings\""), "{action}");
+}
+
+/// The pane draws one row per option and cannot fold them, so the popup has to
+/// be tall enough for the whole list. A default popup is 24 rows; the list is
+/// longer than that, and an option below the fold is an option nobody finds.
+#[test]
+fn the_settings_popup_is_tall_enough_for_every_option() {
+    let manifest = include_str!("../herdr-plugin.toml");
+    let pane = manifest
+        .split("[[panes]]")
+        .find(|pane| pane.contains("id = \"settings\""))
+        .unwrap();
+    let height: usize = pane
+        .lines()
+        .find_map(|line| line.strip_prefix("height = "))
+        .expect("the settings popup declares a height")
+        .trim()
+        .parse()
+        .unwrap();
+    // Three section headers, seven choices, every field, every agent, four
+    // lines of TUI chrome, and the two rows consumed by Herdr's pane border.
+    // Walk the live lists so adding a harness or field without growing the
+    // popup is a test failure, not a row below the fold.
+    assert!(
+        height
+            >= 3 + 7
+                + herdr_agent_quota::cli::SidebarField::ALL.len()
+                + herdr_agent_quota::cli::AgentSelection::SUPPORTED.len()
+                + 4
+                + 2,
+        "height = {height}"
+    );
+}
+
+/// Herdr accepts a plugin-owned agent view only from `plugin:<manifest id>`
+/// and answers `plugin_not_found` for anything else, so the source the plugin
+/// sends and the id it is installed under have to be the same string.
+#[test]
+fn the_agent_view_source_matches_the_manifest_id() {
+    let manifest = include_str!("../herdr-plugin.toml");
+    let id = manifest
+        .lines()
+        .find_map(|line| line.strip_prefix("id = "))
+        .expect("the manifest declares an id")
+        .trim()
+        .trim_matches('"');
+    assert_eq!(id, herdr_agent_quota::identity::PLUGIN_ID);
+    assert_eq!(
+        herdr_agent_quota::identity::agent_view_source(),
+        format!("plugin:{id}")
+    );
+}
+
+#[test]
+fn runtime_entrypoints_do_not_depend_on_a_unix_shell() {
+    let manifest: toml_edit::DocumentMut = include_str!("../herdr-plugin.toml").parse().unwrap();
+    for section in ["startup", "actions", "events", "panes"] {
+        for entry in manifest[section].as_array_of_tables().unwrap() {
+            let command = entry["command"].as_array().unwrap();
+            assert_eq!(
+                command.get(0).unwrap().as_str(),
+                Some("target/release/herdr-agent-usage")
+            );
+        }
+    }
+}

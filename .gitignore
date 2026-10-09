@@ -1,19 +1,20 @@
+# Build artifacts
 /target/
+
+# Editor, OS and local environment files
 *.swp
 .DS_Store
+Thumbs.db
 .env
 .env.*
 !.env.example
-.herdr-agent-quota/
-.herdr-agent-usage/
-.herdr-state/
 
-# Local agent state and implementation plans
-/.agents/
-/.claude/
-/.codex/
-/.longgraph/
-/.devin/
+# Local agent state and private execution plans (at any component level)
+.agents/
+.claude/
+.codex/
+.longgraph/
+.devin/
 PLAN.md
 
 # External references

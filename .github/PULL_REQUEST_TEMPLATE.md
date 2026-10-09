@@ -1,16 +1,19 @@
 ## What this changes
 
-<!-- One or two sentences. Link the issue if there is one. -->
+<!-- Describe the problem and resulting behavior. Link the issue if there is one. -->
 
-## Checklist
+## Component
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --all-targets --all-features -- -D warnings`
-- [ ] `cargo test --all-targets --all-features --locked`
-- [ ] A parser change comes with a fixture in `tests/fixtures/` and a test
-- [ ] No new network call, background process, or credential write
+<!-- herdr_usage, skills/<name>, procedures/<name>, or repository infrastructure. -->
 
-## Provider impact
+## Validation
 
-<!-- Which of Claude Code / Codex / Grok / Agy this affects, and the CLI
-     version you checked it against. Write "none" if not applicable. -->
+- [ ] Component documentation and instructions are updated where needed
+- [ ] Required checks for the affected component were run; blockers are documented
+- [ ] No credentials or private session content are included
+
+<!-- For herdr_usage, run from herdr_usage/:
+     cargo fmt --all -- --check
+     cargo clippy --release --all-targets --all-features --locked -- -D warnings
+     cargo test --all-targets --all-features --locked
+     Parser changes need representative fixtures in herdr_usage/tests/fixtures/. -->

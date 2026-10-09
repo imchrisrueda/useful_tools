@@ -1,0 +1,42 @@
+[package]
+name = "herdr-agent-quota"
+version = "1.6.2"
+edition = "2021"
+rust-version = "1.95"
+description = "Local-only AI quota and context in Herdr for Codex and Antigravity (Agy)"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/imchrisrueda/useful_tools"
+homepage = "https://herdr.dev/plugins/"
+keywords = ["herdr", "codex", "agy", "antigravity", "quota", "usage"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["docs/screenshots/*", "docs/research/*", ".github/*", ".devin/*"]
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.28"
+directories = "5.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+thiserror = "2.0"
+time = { version = "0.3", features = ["parsing"] }
+toml_edit = "0.22"
+# Codex can archive rollouts as .jsonl.zst. Read the first record for identity
+# and stream a bounded recent window for model/context observations.
+zstd = { version = "0.13", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+# Match Herdr's native local named-pipe transport; no network sockets.
+interprocess = { version = "2.4.4", default-features = false }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_Security"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3.14"
+
+[[bin]]
+name = "herdr-agent-usage"
+path = "src/main.rs"

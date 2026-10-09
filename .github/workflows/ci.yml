@@ -1,4 +1,4 @@
-name: CI
+name: Herdr Usage CI
 
 on:
   push:
@@ -15,6 +15,10 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+
+defaults:
+  run:
+    working-directory: herdr_usage
 
 jobs:
   test:
@@ -33,6 +37,8 @@ jobs:
         run: rustc --version && cargo --version
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "herdr_usage -> target"
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -46,15 +52,16 @@ jobs:
       - name: Build release
         run: cargo build --release --locked
 
-  # This plugin reads credential stores and sends bearer tokens to provider
-  # billing endpoints, so a known-vulnerable dependency is a security issue,
-  # not a chore. The schedule catches advisories published after a merge.
+  # Audit the local-data plugin dependencies. The schedule catches advisories
+  # published after a merge.
   audit:
     name: dependency audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "herdr_usage -> target"
       - uses: taiki-e/install-action@cargo-audit
       - run: cargo audit --deny warnings
 
@@ -65,6 +72,9 @@ jobs:
       - uses: actions/checkout@v4
       # Herdr refuses to load a plugin whose root manifest is missing or
       # malformed, so a broken manifest must fail here rather than on install.
+      - name: Privacy source policy
+        run: python3 scripts/security_audit.py
+
       - name: Validate herdr-plugin.toml
         run: |
           python3 - <<'PY'

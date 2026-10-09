@@ -1,26 +1,28 @@
 name: Feature request
-description: Support another CLI, window, or sidebar layout.
+description: Propose an improvement to a tool, skill, or procedure.
 labels: ["enhancement"]
 body:
+  - type: input
+    id: component
+    attributes:
+      label: Component or proposed path
+      placeholder: "herdr_usage, skills/<name>, procedures/<name>"
+    validations:
+      required: true
   - type: textarea
     id: problem
     attributes:
-      label: What are you trying to see in the sidebar?
+      label: What problem would this solve?
     validations:
       required: true
   - type: textarea
-    id: source
+    id: proposal
     attributes:
-      label: Where does that number come from locally?
-      description: >
-        A new provider needs a local, documented source: a statusLine/hook JSON
-        payload, a local CLI command, or a contract the official CLI itself
-        uses. This project does not scrape browser cookies or private web APIs.
+      label: Proposed behavior and how to check it
     validations:
       required: true
   - type: textarea
-    id: payload
+    id: requirements
     attributes:
-      label: Sample payload
-      description: A redacted sample of that JSON, if you have one.
-      render: json
+      label: Requirements and data sources
+      description: "For Herdr metrics, identify the documented local source and provide a redacted example when available."
