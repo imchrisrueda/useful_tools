@@ -7,13 +7,12 @@ import {
   StoryboardSchema,
   ApprovalRecord,
   ApprovalRecordSchema,
-  ProjectManifest,
-  ProjectManifestSchema,
   Result,
   okResult,
   errorResult
 } from './models.js';
 import { computeCanonicalRevision } from './hash-utils.js';
+import { loadManifestWithRevisionCheck } from './manifest-utils.js';
 
 export interface AnalyzeRequestInput {
   projectDir: string;
@@ -30,29 +29,9 @@ export interface AnalyzeRequestOutput {
 }
 
 export async function applyRequirements(input: AnalyzeRequestInput): Promise<Result<AnalyzeRequestOutput>> {
-  const manifestPath = path.join(input.projectDir, 'project.json');
-  let manifest: ProjectManifest;
-
-  try {
-    const raw = await fs.readFile(manifestPath, 'utf-8');
-    manifest = ProjectManifestSchema.parse(JSON.parse(raw));
-  } catch (err: unknown) {
-    return errorResult({
-      code: 'INVALID_INPUT',
-      message: `Failed to load project manifest: ${(err as Error).message}`,
-      recoverable: false
-    });
-  }
-
-  // Check expected revision
-  const currentRevision = computeCanonicalRevision(manifest);
-  if (currentRevision !== input.expectedRevision) {
-    return errorResult({
-      code: 'REVISION_CONFLICT',
-      message: `Revision conflict: expected ${input.expectedRevision}, but current is ${currentRevision}`,
-      recoverable: false
-    });
-  }
+  const loaded = await loadManifestWithRevisionCheck(input.projectDir, input.expectedRevision);
+  if (!loaded.ok) return loaded;
+  const { manifest, manifestPath } = loaded.value;
 
   // Validate proposal schema
   let validatedProposal: Requirements;
@@ -98,28 +77,9 @@ export interface ApplyStoryboardOutput {
 }
 
 export async function applyStoryboard(input: ApplyStoryboardInput): Promise<Result<ApplyStoryboardOutput>> {
-  const manifestPath = path.join(input.projectDir, 'project.json');
-  let manifest: ProjectManifest;
-
-  try {
-    const raw = await fs.readFile(manifestPath, 'utf-8');
-    manifest = ProjectManifestSchema.parse(JSON.parse(raw));
-  } catch (err: unknown) {
-    return errorResult({
-      code: 'INVALID_INPUT',
-      message: `Failed to load project manifest: ${(err as Error).message}`,
-      recoverable: false
-    });
-  }
-
-  const currentRevision = computeCanonicalRevision(manifest);
-  if (currentRevision !== input.expectedRevision) {
-    return errorResult({
-      code: 'REVISION_CONFLICT',
-      message: `Revision conflict: expected ${input.expectedRevision}, but current is ${currentRevision}`,
-      recoverable: false
-    });
-  }
+  const loaded = await loadManifestWithRevisionCheck(input.projectDir, input.expectedRevision);
+  if (!loaded.ok) return loaded;
+  const { manifest, manifestPath } = loaded.value;
 
   // Validate proposal schema
   let validatedStoryboard: Storyboard;
@@ -133,8 +93,9 @@ export async function applyStoryboard(input: ApplyStoryboardInput): Promise<Resu
     });
   }
 
-  // Check unique slide IDs
+  // Check unique slide IDs and authorized sources
   const slideIds = new Set<string>();
+  const authorizedSet = new Set(input.sourceIds);
   for (const slide of validatedStoryboard.slides) {
     if (slideIds.has(slide.slideId)) {
       return errorResult({
@@ -147,7 +108,7 @@ export async function applyStoryboard(input: ApplyStoryboardInput): Promise<Resu
 
     // Validate that slide sourceIds are authorized
     for (const srcId of slide.sourceIds) {
-      if (!input.sourceIds.includes(srcId)) {
+      if (!authorizedSet.has(srcId)) {
         return errorResult({
           code: 'SOURCE_UNAUTHORIZED',
           message: `Source ID "${srcId}" on slide "${slide.slideId}" is not in authorized sources list.`,
@@ -185,28 +146,9 @@ export interface RecordApprovalOutput {
 }
 
 export async function recordApproval(input: RecordApprovalInput): Promise<Result<RecordApprovalOutput>> {
-  const manifestPath = path.join(input.projectDir, 'project.json');
-  let manifest: ProjectManifest;
-
-  try {
-    const raw = await fs.readFile(manifestPath, 'utf-8');
-    manifest = ProjectManifestSchema.parse(JSON.parse(raw));
-  } catch (err: unknown) {
-    return errorResult({
-      code: 'INVALID_INPUT',
-      message: `Failed to load project manifest: ${(err as Error).message}`,
-      recoverable: false
-    });
-  }
-
-  const currentRevision = computeCanonicalRevision(manifest);
-  if (currentRevision !== input.expectedRevision) {
-    return errorResult({
-      code: 'REVISION_CONFLICT',
-      message: `Revision conflict: expected ${input.expectedRevision}, but current is ${currentRevision}`,
-      recoverable: false
-    });
-  }
+  const loaded = await loadManifestWithRevisionCheck(input.projectDir, input.expectedRevision);
+  if (!loaded.ok) return loaded;
+  const { manifest, manifestPath } = loaded.value;
 
   let validatedApproval: ApprovalRecord;
   try {

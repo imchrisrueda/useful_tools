@@ -18,7 +18,7 @@
 
 | Paquete | Posee | No debe poseer |
 |---|---|---|
-| core | Esquemas, revisiones, estado, hashes, fuentes, catálogo y datos acotados. | API específica de navegador o proveedor de IA. |
+| core | Esquemas, revisiones, estado, hashes, fuentes, catálogo y datos acotados. Incluye `manifest-utils` para centralizar carga con verificación de revisión, gestión del índice de dependencias e invalidación atómica de reportes. | API específica de navegador o proveedor de IA. |
 | engine-slidev | Parseo/inclusiones Slidev, componentes, previsualización y exportación. | Políticas de aprobación propias distintas del núcleo. |
 | quality | Inspección estructural/visual, estados de prueba y evidencias. | Modificación automática del significado científico. |
 | cli | Traducción de comandos a operaciones, diagnóstico y coordinación. | Copias de modelos ni decisiones implícitas de contenido. |

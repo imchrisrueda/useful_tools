@@ -1,16 +1,20 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
+  ProjectManifest,
+  ProjectManifestSchema,
   ValidationReport,
   ValidationFinding,
   ValidationReportSchema,
   ExportReport,
   ExportReportSchema,
+  DependencyIndex,
   Result,
   okResult,
   errorResult
 } from './models.js';
 import { computeCanonicalRevision, computeSha256 } from './hash-utils.js';
+import { loadManifestWithRevisionCheck, loadDependencyIndex } from './manifest-utils.js';
 
 export interface ValidatePresentationInput {
   projectDir: string;
@@ -19,39 +23,21 @@ export interface ValidatePresentationInput {
 }
 
 export async function validatePresentation(input: ValidatePresentationInput): Promise<Result<ValidationReport>> {
-  const manifestPath = path.join(input.projectDir, 'project.json');
-  let manifest: any;
-  try {
-    manifest = JSON.parse(await fs.readFile(manifestPath, 'utf-8'));
-  } catch (err: unknown) {
-    return errorResult({
-      code: 'INVALID_INPUT',
-      message: `Failed to load project manifest: ${(err as Error).message}`,
-      recoverable: false
-    });
-  }
+  const loaded = await loadManifestWithRevisionCheck(input.projectDir, input.revision);
+  if (!loaded.ok) return loaded;
+  const { manifest, manifestPath } = loaded.value;
 
-  const currentRevision = computeCanonicalRevision(manifest);
-  if (currentRevision !== input.revision) {
-    return errorResult({
-      code: 'REVISION_CONFLICT',
-      message: `Revision conflict: project revision changed`,
-      recoverable: false
-    });
-  }
-
-  const depIndexPath = path.join(input.projectDir, 'dependency-index.json');
-  let depIndex: Record<string, { file: string; hash: string; resources: string[] }>;
-  try {
-    depIndex = JSON.parse(await fs.readFile(depIndexPath, 'utf-8'));
-  } catch {
+  const depLoaded = await loadDependencyIndex(input.projectDir, 'No slides generated or dependency index missing');
+  if (!depLoaded.ok) {
     return errorResult({
       code: 'VALIDATION_FAILED',
       message: 'No slides generated or dependency index missing',
       recoverable: false
     });
   }
+  const depIndex = depLoaded.value;
 
+  const currentRevision = computeCanonicalRevision(manifest);
   const findings: ValidationFinding[] = [];
   const inspected: { slideId: string; captureRef: string }[] = [];
 
@@ -126,26 +112,11 @@ export interface ExportPresentationInput {
 }
 
 export async function exportPresentation(input: ExportPresentationInput): Promise<Result<ExportReport>> {
-  const manifestPath = path.join(input.projectDir, 'project.json');
-  let manifest: any;
-  try {
-    manifest = JSON.parse(await fs.readFile(manifestPath, 'utf-8'));
-  } catch (err: unknown) {
-    return errorResult({
-      code: 'INVALID_INPUT',
-      message: `Failed to load project manifest: ${(err as Error).message}`,
-      recoverable: false
-    });
-  }
+  const loaded = await loadManifestWithRevisionCheck(input.projectDir, input.revision);
+  if (!loaded.ok) return loaded;
+  const { manifest, manifestPath } = loaded.value;
 
   const currentRevision = computeCanonicalRevision(manifest);
-  if (currentRevision !== input.revision) {
-    return errorResult({
-      code: 'REVISION_CONFLICT',
-      message: `Revision conflict: expected ${input.revision}, current is ${currentRevision}`,
-      recoverable: false
-    });
-  }
 
   // Check validation report exists and passed
   const valReportPath = path.join(input.projectDir, 'reports', 'validation-report.json');

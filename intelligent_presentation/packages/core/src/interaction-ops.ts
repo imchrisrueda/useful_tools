@@ -1,13 +1,16 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
-  ProjectManifest,
-  ProjectManifestSchema,
   Result,
   okResult,
   errorResult
 } from './models.js';
-import { computeCanonicalRevision } from './hash-utils.js';
+import {
+  loadManifestWithRevisionCheck,
+  loadDependencyIndex,
+  invalidateReportsAndSave,
+  saveDependencyIndex
+} from './manifest-utils.js';
 
 export interface InteractiveComponentSpec {
   id: string;
@@ -63,28 +66,9 @@ export interface AddInteractionOutput {
 }
 
 export async function addInteraction(input: AddInteractionInput): Promise<Result<AddInteractionOutput>> {
-  const manifestPath = path.join(input.projectDir, 'project.json');
-  let manifest: ProjectManifest;
-
-  try {
-    const raw = await fs.readFile(manifestPath, 'utf-8');
-    manifest = ProjectManifestSchema.parse(JSON.parse(raw));
-  } catch (err: unknown) {
-    return errorResult({
-      code: 'INVALID_INPUT',
-      message: `Failed to load project manifest: ${(err as Error).message}`,
-      recoverable: false
-    });
-  }
-
-  const currentRevision = computeCanonicalRevision(manifest);
-  if (currentRevision !== input.expectedRevision) {
-    return errorResult({
-      code: 'REVISION_CONFLICT',
-      message: `Revision conflict: expected ${input.expectedRevision}, current is ${currentRevision}`,
-      recoverable: false
-    });
-  }
+  const loaded = await loadManifestWithRevisionCheck(input.projectDir, input.expectedRevision);
+  if (!loaded.ok) return loaded;
+  const { manifest, manifestPath } = loaded.value;
 
   // Validate component registration
   const registeredSpec = REGISTERED_INTERACTIVE_COMPONENTS[input.interaction.componentId];
@@ -136,17 +120,9 @@ export async function addInteraction(input: AddInteractionInput): Promise<Result
     });
   }
 
-  const depIndexPath = path.join(input.projectDir, 'dependency-index.json');
-  let depIndex: Record<string, { file: string; hash: string; resources: string[] }>;
-  try {
-    depIndex = JSON.parse(await fs.readFile(depIndexPath, 'utf-8'));
-  } catch {
-    return errorResult({
-      code: 'INVALID_INPUT',
-      message: 'Slides must be generated before adding interactions',
-      recoverable: false
-    });
-  }
+  const depLoaded = await loadDependencyIndex(input.projectDir, 'Slides must be generated before adding interactions');
+  if (!depLoaded.ok) return depLoaded;
+  const depIndex = depLoaded.value;
 
   if (!depIndex[input.slideId]) {
     return errorResult({
@@ -250,14 +226,9 @@ function reset() {
   if (!depIndex[input.slideId].resources.includes(interResourceId)) {
     depIndex[input.slideId].resources.push(interResourceId);
   }
-  await fs.writeFile(depIndexPath, JSON.stringify(depIndex, null, 2), 'utf-8');
+  await saveDependencyIndex(input.projectDir, depIndex);
 
-  // Invalidate validation and export reports
-  delete manifest.artifacts['validationReport'];
-  delete manifest.artifacts['exportReport'];
-
-  const newRevision = computeCanonicalRevision(manifest);
-  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  const newRevision = await invalidateReportsAndSave(manifest, manifestPath);
 
   return okResult({
     componentRef,

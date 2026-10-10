@@ -2,12 +2,18 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   ProjectManifest,
-  ProjectManifestSchema,
+  DependencyIndex,
   Result,
   okResult,
   errorResult
 } from './models.js';
 import { computeCanonicalRevision, computeSha256 } from './hash-utils.js';
+import {
+  loadManifestWithRevisionCheck,
+  loadDependencyIndex,
+  invalidateReportsAndSave,
+  saveDependencyIndex
+} from './manifest-utils.js';
 
 export interface SlideProposalItem {
   slideId: string;
@@ -30,29 +36,14 @@ export interface GenerateSlidesOutput {
   revision: string;
 }
 
+function slideFilename(idx: number, slideId: string): string {
+  return `${String(idx + 1).padStart(2, '0')}-${slideId}.md`;
+}
+
 export async function generateSlides(input: GenerateSlidesInput): Promise<Result<GenerateSlidesOutput>> {
-  const manifestPath = path.join(input.projectDir, 'project.json');
-  let manifest: ProjectManifest;
-
-  try {
-    const raw = await fs.readFile(manifestPath, 'utf-8');
-    manifest = ProjectManifestSchema.parse(JSON.parse(raw));
-  } catch (err: unknown) {
-    return errorResult({
-      code: 'INVALID_INPUT',
-      message: `Failed to load project manifest: ${(err as Error).message}`,
-      recoverable: false
-    });
-  }
-
-  const currentRevision = computeCanonicalRevision(manifest);
-  if (currentRevision !== input.expectedRevision) {
-    return errorResult({
-      code: 'REVISION_CONFLICT',
-      message: `Revision conflict: expected ${input.expectedRevision}, but current is ${currentRevision}`,
-      recoverable: false
-    });
-  }
+  const loaded = await loadManifestWithRevisionCheck(input.projectDir, input.expectedRevision);
+  if (!loaded.ok) return loaded;
+  const { manifest, manifestPath } = loaded.value;
 
   if (input.proposal.length === 0) {
     return errorResult({
@@ -86,18 +77,19 @@ export async function generateSlides(input: GenerateSlidesInput): Promise<Result
   await fs.mkdir(slidesDir, { recursive: true });
 
   const slidePaths: string[] = [];
-  const dependencyIndex: Record<string, { file: string; hash: string; resources: string[] }> = {};
+  const dependencyIndex: DependencyIndex = {};
 
   // Write individual slide markdown files
   for (let idx = 0; idx < input.proposal.length; idx++) {
     const slide = input.proposal[idx];
-    const filename = `${String(idx + 1).padStart(2, '0')}-${slide.slideId}.md`;
+    const filename = slideFilename(idx, slide.slideId);
     const fullPath = path.join(slidesDir, filename);
     await fs.writeFile(fullPath, slide.markdown, 'utf-8');
-    slidePaths.push(path.relative(input.projectDir, fullPath));
+    const relPath = path.relative(input.projectDir, fullPath);
+    slidePaths.push(relPath);
 
     dependencyIndex[slide.slideId] = {
-      file: path.relative(input.projectDir, fullPath),
+      file: relPath,
       hash: computeSha256(slide.markdown),
       resources: slide.resourceIds
     };
@@ -117,8 +109,7 @@ export async function generateSlides(input: GenerateSlidesInput): Promise<Result
   ];
 
   for (let idx = 0; idx < input.proposal.length; idx++) {
-    const slide = input.proposal[idx];
-    const filename = `${String(idx + 1).padStart(2, '0')}-${slide.slideId}.md`;
+    const filename = slideFilename(idx, input.proposal[idx].slideId);
     entryLines.push(`---`);
     entryLines.push(`src: ./slides/${filename}`);
     entryLines.push(`---`);
@@ -129,8 +120,7 @@ export async function generateSlides(input: GenerateSlidesInput): Promise<Result
   await fs.writeFile(entryPath, entryLines.join('\n'), 'utf-8');
 
   // Write dependency index
-  const depIndexPath = path.join(input.projectDir, 'dependency-index.json');
-  await fs.writeFile(depIndexPath, JSON.stringify(dependencyIndex, null, 2), 'utf-8');
+  await saveDependencyIndex(input.projectDir, dependencyIndex);
 
   // Update manifest
   manifest.designRef = input.designRef;
@@ -169,42 +159,13 @@ export interface UpdateSlideOutput {
 }
 
 export async function updateSlide(input: UpdateSlideInput): Promise<Result<UpdateSlideOutput>> {
-  const manifestPath = path.join(input.projectDir, 'project.json');
-  let manifest: ProjectManifest;
+  const loaded = await loadManifestWithRevisionCheck(input.projectDir, input.expectedRevision);
+  if (!loaded.ok) return loaded;
+  const { manifest, manifestPath } = loaded.value;
 
-  try {
-    const raw = await fs.readFile(manifestPath, 'utf-8');
-    manifest = ProjectManifestSchema.parse(JSON.parse(raw));
-  } catch (err: unknown) {
-    return errorResult({
-      code: 'INVALID_INPUT',
-      message: `Failed to load project manifest: ${(err as Error).message}`,
-      recoverable: false
-    });
-  }
-
-  const currentRevision = computeCanonicalRevision(manifest);
-  if (currentRevision !== input.expectedRevision) {
-    return errorResult({
-      code: 'REVISION_CONFLICT',
-      message: `Revision conflict: expected ${input.expectedRevision}, but current is ${currentRevision}`,
-      recoverable: false
-    });
-  }
-
-  // Load dependency index
-  const depIndexPath = path.join(input.projectDir, 'dependency-index.json');
-  let depIndex: Record<string, { file: string; hash: string; resources: string[] }>;
-  try {
-    const rawDep = await fs.readFile(depIndexPath, 'utf-8');
-    depIndex = JSON.parse(rawDep);
-  } catch {
-    return errorResult({
-      code: 'INVALID_INPUT',
-      message: 'No slides generated yet or dependency index missing',
-      recoverable: false
-    });
-  }
+  const depLoaded = await loadDependencyIndex(input.projectDir, 'No slides generated yet or dependency index missing');
+  if (!depLoaded.ok) return depLoaded;
+  const depIndex = depLoaded.value;
 
   if (!depIndex[input.slideId]) {
     return errorResult({
@@ -230,17 +191,11 @@ export async function updateSlide(input: UpdateSlideInput): Promise<Result<Updat
     depIndex[input.slideId].resources = input.change.resourceIds;
   }
 
-  await fs.writeFile(depIndexPath, JSON.stringify(depIndex, null, 2), 'utf-8');
-
-  // Invalidate validation report and export artifacts
-  const invalidatedArtifacts: string[] = ['validationReport', 'exportReport'];
-  delete manifest.artifacts['validationReport'];
-  delete manifest.artifacts['exportReport'];
+  await saveDependencyIndex(input.projectDir, depIndex);
 
   const preservedSlideIds = Object.keys(depIndex).filter((id) => id !== input.slideId);
-
-  const newRevision = computeCanonicalRevision(manifest);
-  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  const invalidatedArtifacts: string[] = ['validationReport', 'exportReport'];
+  const newRevision = await invalidateReportsAndSave(manifest, manifestPath);
 
   return okResult({
     slideId: input.slideId,

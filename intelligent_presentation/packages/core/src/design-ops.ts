@@ -1,243 +1,149 @@
 import { DesignManifest, DesignManifestSchema, Result, okResult, errorResult } from './models.js';
 
-// 1. Scientific Minimal (MVP)
-export const SCIENTIFIC_MINIMAL_THEME: DesignManifest = {
-  id: 'scientific-minimal',
-  version: '1.0.0',
-  family: 'Scientific Minimal',
-  tokens: {
-    colors: {
-      background: '#ffffff',
-      surface: '#f8fafc',
-      text: '#0f172a',
-      mutedText: '#475569',
-      accent: '#2563eb',
-      border: '#e2e8f0'
-    },
-    typography: {
-      headingFont: 'system-ui, -apple-system, sans-serif',
-      bodyFont: 'system-ui, -apple-system, sans-serif',
-      codeFont: 'monospace'
-    },
-    spacing: {
-      safeMargin: '48px',
-      gap: '24px'
-    }
-  },
-  layouts: [
-    'portada',
-    'seccion',
-    'texto',
-    'dos-columnas',
-    'figura',
-    'grafico',
-    'conclusion'
-  ],
-  components: ['title', 'quote', 'figure-caption', 'chart', 'message-box'],
-  fonts: [
-    {
-      family: 'Inter',
-      assetRef: 'system-ui',
-      license: 'OFL-1.1'
-    }
-  ],
-  capabilities: ['web', 'pdf'],
-  license: 'MIT'
+// --- Shared base tokens to eliminate repetition across themes ---
+
+const BASE_TYPOGRAPHY = {
+  headingFont: 'system-ui, -apple-system, sans-serif',
+  bodyFont: 'system-ui, -apple-system, sans-serif',
+  codeFont: 'monospace'
 };
+
+const BASE_FONT: DesignManifest['fonts'][number] = {
+  family: 'Inter',
+  assetRef: 'system-ui',
+  license: 'OFL-1.1'
+};
+
+const BASE_LAYOUTS = [
+  'portada',
+  'seccion',
+  'texto',
+  'dos-columnas',
+  'figura',
+  'grafico',
+  'conclusion'
+];
+
+const BASE_CAPABILITIES: DesignManifest['capabilities'] = ['web', 'pdf'];
+
+interface ThemeConfig {
+  id: string;
+  family: string;
+  colors: Record<string, string>;
+  spacing: { safeMargin: string; gap: string };
+  extraLayouts?: string[];
+  extraComponents?: string[];
+}
+
+function createTheme(config: ThemeConfig): DesignManifest {
+  return {
+    id: config.id,
+    version: '1.0.0',
+    family: config.family,
+    tokens: {
+      colors: config.colors,
+      typography: BASE_TYPOGRAPHY,
+      spacing: config.spacing
+    },
+    layouts: [...BASE_LAYOUTS, ...(config.extraLayouts ?? [])],
+    components: ['title', 'quote', 'figure-caption', 'chart', ...(config.extraComponents ?? ['message-box'])],
+    fonts: [BASE_FONT],
+    capabilities: BASE_CAPABILITIES,
+    license: 'MIT'
+  };
+}
+
+// 1. Scientific Minimal (MVP)
+export const SCIENTIFIC_MINIMAL_THEME: DesignManifest = createTheme({
+  id: 'scientific-minimal',
+  family: 'Scientific Minimal',
+  colors: {
+    background: '#ffffff',
+    surface: '#f8fafc',
+    text: '#0f172a',
+    mutedText: '#475569',
+    accent: '#2563eb',
+    border: '#e2e8f0'
+  },
+  spacing: { safeMargin: '48px', gap: '24px' }
+});
 
 // 2. Tech Keynote (MVP)
-export const TECH_KEYNOTE_THEME: DesignManifest = {
+export const TECH_KEYNOTE_THEME: DesignManifest = createTheme({
   id: 'tech-keynote',
-  version: '1.0.0',
   family: 'Tech Keynote',
-  tokens: {
-    colors: {
-      background: '#090d16',
-      surface: '#111827',
-      text: '#f9fafb',
-      mutedText: '#9ca3af',
-      accent: '#38bdf8',
-      border: '#1f2937'
-    },
-    typography: {
-      headingFont: 'system-ui, -apple-system, sans-serif',
-      bodyFont: 'system-ui, -apple-system, sans-serif',
-      codeFont: 'monospace'
-    },
-    spacing: {
-      safeMargin: '48px',
-      gap: '24px'
-    }
+  colors: {
+    background: '#090d16',
+    surface: '#111827',
+    text: '#f9fafb',
+    mutedText: '#9ca3af',
+    accent: '#38bdf8',
+    border: '#1f2937'
   },
-  layouts: [
-    'portada',
-    'seccion',
-    'texto',
-    'dos-columnas',
-    'figura',
-    'grafico',
-    'conclusion'
-  ],
-  components: ['title', 'quote', 'figure-caption', 'chart', 'message-box'],
-  fonts: [
-    {
-      family: 'Inter',
-      assetRef: 'system-ui',
-      license: 'OFL-1.1'
-    }
-  ],
-  capabilities: ['web', 'pdf'],
-  license: 'MIT'
-};
+  spacing: { safeMargin: '48px', gap: '24px' }
+});
 
 // 3. Data Storytelling (Fase 2)
-export const DATA_STORYTELLING_THEME: DesignManifest = {
+export const DATA_STORYTELLING_THEME: DesignManifest = createTheme({
   id: 'data-storytelling',
-  version: '1.0.0',
   family: 'Data Storytelling',
-  tokens: {
-    colors: {
-      background: '#fafaf9',
-      surface: '#f5f5f4',
-      text: '#1c1917',
-      mutedText: '#57534e',
-      accent: '#ea580c', // Orange focal accent for data callouts
-      border: '#e7e5e4'
-    },
-    typography: {
-      headingFont: 'system-ui, -apple-system, sans-serif',
-      bodyFont: 'system-ui, -apple-system, sans-serif',
-      codeFont: 'monospace'
-    },
-    spacing: {
-      safeMargin: '48px',
-      gap: '20px'
-    }
+  colors: {
+    background: '#fafaf9',
+    surface: '#f5f5f4',
+    text: '#1c1917',
+    mutedText: '#57534e',
+    accent: '#ea580c', // Orange focal accent for data callouts
+    border: '#e7e5e4'
   },
-  layouts: [
-    'portada',
-    'seccion',
-    'texto',
-    'dos-columnas',
-    'figura',
-    'grafico',
-    'conclusion',
-    'comparativa-metricas',
-    'destacado-dato'
-  ],
-  components: ['title', 'quote', 'figure-caption', 'chart', 'metric-callout', 'message-box'],
-  fonts: [
-    {
-      family: 'Inter',
-      assetRef: 'system-ui',
-      license: 'OFL-1.1'
-    }
-  ],
-  capabilities: ['web', 'pdf'],
-  license: 'MIT'
-};
+  spacing: { safeMargin: '48px', gap: '20px' },
+  extraLayouts: ['comparativa-metricas', 'destacado-dato'],
+  extraComponents: ['metric-callout', 'message-box']
+});
 
 // 4. Interactive Workshop (Fase 2)
-export const INTERACTIVE_WORKSHOP_THEME: DesignManifest = {
+export const INTERACTIVE_WORKSHOP_THEME: DesignManifest = createTheme({
   id: 'interactive-workshop',
-  version: '1.0.0',
   family: 'Interactive Workshop',
-  tokens: {
-    colors: {
-      background: '#f8fafc',
-      surface: '#ffffff',
-      text: '#0f172a',
-      mutedText: '#334155',
-      accent: '#8b5cf6', // Violet accent for laboratory exercises and interactive components
-      border: '#cbd5e1'
-    },
-    typography: {
-      headingFont: 'system-ui, -apple-system, sans-serif',
-      bodyFont: 'system-ui, -apple-system, sans-serif',
-      codeFont: 'monospace'
-    },
-    spacing: {
-      safeMargin: '40px',
-      gap: '20px'
-    }
+  colors: {
+    background: '#f8fafc',
+    surface: '#ffffff',
+    text: '#0f172a',
+    mutedText: '#334155',
+    accent: '#8b5cf6', // Violet accent for laboratory exercises and interactive components
+    border: '#cbd5e1'
   },
-  layouts: [
-    'portada',
-    'seccion',
-    'texto',
-    'dos-columnas',
-    'figura',
-    'grafico',
-    'conclusion',
-    'laboratorio-interactivo',
-    'ejercicio-guiado'
-  ],
-  components: ['title', 'quote', 'figure-caption', 'chart', 'interactive-slider', 'step-tracker'],
-  fonts: [
-    {
-      family: 'Inter',
-      assetRef: 'system-ui',
-      license: 'OFL-1.1'
-    }
-  ],
-  capabilities: ['web', 'pdf'],
-  license: 'MIT'
-};
+  spacing: { safeMargin: '40px', gap: '20px' },
+  extraLayouts: ['laboratorio-interactivo', 'ejercicio-guiado'],
+  extraComponents: ['interactive-slider', 'step-tracker']
+});
 
 // 5. Executive Professional (Fase 2)
-export const EXECUTIVE_PROFESSIONAL_THEME: DesignManifest = {
+export const EXECUTIVE_PROFESSIONAL_THEME: DesignManifest = createTheme({
   id: 'executive-professional',
-  version: '1.0.0',
   family: 'Executive Professional',
-  tokens: {
-    colors: {
-      background: '#ffffff',
-      surface: '#f1f5f9',
-      text: '#0f172a',
-      mutedText: '#334155',
-      accent: '#0369a1', // Deep corporate navy blue
-      border: '#cbd5e1'
-    },
-    typography: {
-      headingFont: 'system-ui, -apple-system, sans-serif',
-      bodyFont: 'system-ui, -apple-system, sans-serif',
-      codeFont: 'monospace'
-    },
-    spacing: {
-      safeMargin: '56px',
-      gap: '28px'
-    }
+  colors: {
+    background: '#ffffff',
+    surface: '#f1f5f9',
+    text: '#0f172a',
+    mutedText: '#334155',
+    accent: '#0369a1', // Deep corporate navy blue
+    border: '#cbd5e1'
   },
-  layouts: [
-    'portada',
-    'seccion',
-    'texto',
-    'dos-columnas',
-    'figura',
-    'grafico',
-    'conclusion',
-    'resumen-ejecutivo',
-    'matriz-decisiones'
-  ],
-  components: ['title', 'quote', 'figure-caption', 'chart', 'kpi-summary', 'executive-bullet'],
-  fonts: [
-    {
-      family: 'Inter',
-      assetRef: 'system-ui',
-      license: 'OFL-1.1'
-    }
-  ],
-  capabilities: ['web', 'pdf'],
-  license: 'MIT'
-};
+  spacing: { safeMargin: '56px', gap: '28px' },
+  extraLayouts: ['resumen-ejecutivo', 'matriz-decisiones'],
+  extraComponents: ['kpi-summary', 'executive-bullet']
+});
 
-export const THEME_CATALOG: Record<string, DesignManifest> = {
-  'scientific-minimal': DesignManifestSchema.parse(SCIENTIFIC_MINIMAL_THEME),
-  'tech-keynote': DesignManifestSchema.parse(TECH_KEYNOTE_THEME),
-  'data-storytelling': DesignManifestSchema.parse(DATA_STORYTELLING_THEME),
-  'interactive-workshop': DesignManifestSchema.parse(INTERACTIVE_WORKSHOP_THEME),
-  'executive-professional': DesignManifestSchema.parse(EXECUTIVE_PROFESSIONAL_THEME)
-};
+// Catalog built once from validated constants (Zod validation runs at module init)
+export const THEME_CATALOG: Record<string, DesignManifest> = Object.fromEntries(
+  [
+    SCIENTIFIC_MINIMAL_THEME,
+    TECH_KEYNOTE_THEME,
+    DATA_STORYTELLING_THEME,
+    INTERACTIVE_WORKSHOP_THEME,
+    EXECUTIVE_PROFESSIONAL_THEME
+  ].map((theme) => [theme.id, DesignManifestSchema.parse(theme)])
+);
 
 export interface RecommendationCriteria {
   audience?: 'cientifica' | 'tecnica' | 'ejecutiva' | 'estudiantes' | 'general';
@@ -266,32 +172,38 @@ export interface SuggestDesignsInput {
   criteria?: RecommendationCriteria;
 }
 
+const THEME_SCORING_RULES: Record<string, (c: RecommendationCriteria) => number> = {
+  'scientific-minimal': (c) =>
+    (c.audience === 'cientifica' ? 35 : 0) +
+    (c.presentationTone === 'riguroso' ? 20 : 0) +
+    (c.dataDensity === 'alta' ? 15 : 0),
+  'tech-keynote': (c) =>
+    (c.audience === 'tecnica' || c.audience === 'general' ? 35 : 0) +
+    (c.presentationTone === 'innovador' ? 25 : 0),
+  'data-storytelling': (c) =>
+    (c.dataDensity === 'alta' || c.dataDensity === 'media' ? 35 : 0) +
+    (c.presentationTone === 'innovador' || c.presentationTone === 'riguroso' ? 15 : 0),
+  'interactive-workshop': (c) =>
+    (c.audience === 'estudiantes' || c.audience === 'tecnica' ? 35 : 0) +
+    (c.presentationTone === 'didactico' ? 25 : 0),
+  'executive-professional': (c) =>
+    (c.audience === 'ejecutiva' ? 40 : 0) +
+    (c.presentationTone === 'institucional' ? 25 : 0) +
+    (c.dataDensity === 'baja' ? 15 : 0)
+};
+
+const THEME_RATIONALES: Record<string, string> = {
+  'scientific-minimal': 'Rigor metodológico, figuras de alto contraste sobre fondo blanco y máxima legibilidad.',
+  'tech-keynote': 'Diseño oscuro contemporáneo de alto contraste para presentaciones técnicas y divulgación.',
+  'data-storytelling': 'Optimizado para destacar hallazgos numéricos, comparativas de métricas y gráficos protagonistas.',
+  'interactive-workshop': 'Enfoque didáctico para formación técnica con soporte de controles visibles y laboratorios guiados.',
+  'executive-professional': 'Elegancia corporativa estructurada para síntesis estratégica y comités directivos.'
+};
+
 export function calculateThemeScore(themeId: string, criteria?: RecommendationCriteria): number {
   if (!criteria) return 50; // Neutral baseline
-  let score = 50;
-
-  const { audience, dataDensity, presentationTone } = criteria;
-
-  if (themeId === 'scientific-minimal') {
-    if (audience === 'cientifica') score += 35;
-    if (presentationTone === 'riguroso') score += 20;
-    if (dataDensity === 'alta') score += 15;
-  } else if (themeId === 'tech-keynote') {
-    if (audience === 'tecnica' || audience === 'general') score += 35;
-    if (presentationTone === 'innovador') score += 25;
-  } else if (themeId === 'data-storytelling') {
-    if (dataDensity === 'alta' || dataDensity === 'media') score += 35;
-    if (presentationTone === 'innovador' || presentationTone === 'riguroso') score += 15;
-  } else if (themeId === 'interactive-workshop') {
-    if (audience === 'estudiantes' || audience === 'tecnica') score += 35;
-    if (presentationTone === 'didactico') score += 25;
-  } else if (themeId === 'executive-professional') {
-    if (audience === 'ejecutiva') score += 40;
-    if (presentationTone === 'institucional') score += 25;
-    if (dataDensity === 'baja') score += 15;
-  }
-
-  return score;
+  const scoreFn = THEME_SCORING_RULES[themeId];
+  return 50 + (scoreFn ? scoreFn(criteria) : 0);
 }
 
 export function suggestDesigns(input: SuggestDesignsInput): Result<{ proposals: DesignProposal[] }> {
@@ -317,42 +229,21 @@ export function suggestDesigns(input: SuggestDesignsInput): Result<{ proposals: 
   // Sort descending by score
   scoredThemes.sort((a, b) => b.score - a.score);
 
-  const proposals: DesignProposal[] = scoredThemes.slice(0, input.requestedCount).map(({ id, theme, score }) => {
-    let rationale = '';
-    switch (id) {
-      case 'scientific-minimal':
-        rationale = 'Rigor metodológico, figuras de alto contraste sobre fondo blanco y máxima legibilidad.';
-        break;
-      case 'tech-keynote':
-        rationale = 'Diseño oscuro contemporáneo de alto contraste para presentaciones técnicas y divulgación.';
-        break;
-      case 'data-storytelling':
-        rationale = 'Optimizado para destacar hallazgos numéricos, comparativas de métricas y gráficos protagonistas.';
-        break;
-      case 'interactive-workshop':
-        rationale = 'Enfoque didáctico para formación técnica con soporte de controles visibles y laboratorios guiados.';
-        break;
-      case 'executive-professional':
-        rationale = 'Elegancia corporativa estructurada para síntesis estratégica y comités directivos.';
-        break;
-    }
-
-    return {
-      id: `prop-${id}`,
-      designId: theme.id,
-      designVersion: theme.version,
-      family: theme.family,
-      overrides: {},
-      score,
-      rationale,
-      previews: [
-        `templates/previews/${id}-cover.png`,
-        `templates/previews/${id}-dense.png`,
-        `templates/previews/${id}-chart.png`
-      ],
-      limitations: ['Animaciones Manim pesadas se presentan como póster estático en PDF']
-    };
-  });
+  const proposals: DesignProposal[] = scoredThemes.slice(0, input.requestedCount).map(({ id, theme, score }) => ({
+    id: `prop-${id}`,
+    designId: theme.id,
+    designVersion: theme.version,
+    family: theme.family,
+    overrides: {},
+    score,
+    rationale: THEME_RATIONALES[id] ?? '',
+    previews: [
+      `templates/previews/${id}-cover.png`,
+      `templates/previews/${id}-dense.png`,
+      `templates/previews/${id}-chart.png`
+    ],
+    limitations: ['Animaciones Manim pesadas se presentan como póster estático en PDF']
+  }));
 
   return okResult({ proposals });
 }

@@ -234,3 +234,11 @@ export const ProjectStateSchema = z.object({
   lastError: OperationErrorSchema.optional()
 });
 export type ProjectState = z.infer<typeof ProjectStateSchema>;
+
+export interface DependencyIndexEntry {
+  file: string;
+  hash: string;
+  resources: string[];
+}
+
+export type DependencyIndex = Record<string, DependencyIndexEntry>;

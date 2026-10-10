@@ -1,6 +1,7 @@
 export * from './models.js';
 export * from './fs-utils.js';
 export * from './hash-utils.js';
+export * from './manifest-utils.js';
 export * from './project-ops.js';
 export * from './state-ops.js';
 export * from './csv-ops.js';
