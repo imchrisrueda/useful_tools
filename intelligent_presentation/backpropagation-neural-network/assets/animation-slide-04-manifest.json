@@ -1,0 +1,28 @@
+{
+  "slideId": "slide-04",
+  "provider": "manim-community-v0.22.0",
+  "sceneRef": "BackpropagationScene",
+  "parameters": {
+    "inputNeurons": 2,
+    "hiddenNeurons": 3,
+    "outputNeurons": 1,
+    "learningRate": 0.5,
+    "epochsDemonstrated": 3,
+    "videoAsset": "assets/backprop_animation.mp4",
+    "posterAsset": "assets/backprop_poster.png"
+  },
+  "segmentIds": [
+    "forward-pass",
+    "loss-eval",
+    "backward-deltas",
+    "gradual-weight-update"
+  ],
+  "staticStateId": "convergence",
+  "altText": "Animación en Manim de red neuronal 2-3-1 mostrando backpropagation y ajuste gradual de pesos",
+  "controls": {
+    "stepForward": "Right / Click",
+    "stepBackward": "Left",
+    "playPause": "Space",
+    "reset": "R"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@ips/core",
+  "version": "0.1.0",
+  "description": "Core data models, schemas, and contracts for IPS",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit",
+    "test": "node --test dist/models.test.js dist/project-ops.test.js dist/state-ops.test.js dist/e2e-pipeline.test.js dist/scientific-e2e.test.js dist/animation-ops.test.js dist/interaction-ops.test.js dist/phase2-design.test.js"
+  },
+  "dependencies": {
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^5.7.3"
+  }
+}

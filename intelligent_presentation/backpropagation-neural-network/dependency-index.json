@@ -1,0 +1,33 @@
+{
+  "slide-01": {
+    "file": "slides\\01-slide-01.md",
+    "hash": "8e185333b5fa6a2d580a6b928832e686e4d73e105fdba7478d573c06d5030d54",
+    "resources": []
+  },
+  "slide-02": {
+    "file": "slides\\02-slide-02.md",
+    "hash": "cce18653c0350e7510bdf03ccd581e0e4e59e875128742f08e19b5762e6716ac",
+    "resources": []
+  },
+  "slide-03": {
+    "file": "slides\\03-slide-03.md",
+    "hash": "94f887cbaf2b3146c09aa8d9dfb172e68375507bbd51d86211e40d2c0f8a4e2e",
+    "resources": []
+  },
+  "slide-04": {
+    "file": "slides\\04-slide-04.md",
+    "hash": "f25a6a12e07d667640ded9ce497ad31f5d26e1516b4cb0108e52d904b92587f0",
+    "resources": [
+      "backprop_animation.mp4",
+      "backprop_poster.png",
+      "anim-slide-04"
+    ]
+  },
+  "slide-05": {
+    "file": "slides\\05-slide-05.md",
+    "hash": "66172dd3987a9126b6ee30872d66747991b0c39a8c9641238beacf6d64cf7463",
+    "resources": [
+      "fig-01-loss-curve"
+    ]
+  }
+}

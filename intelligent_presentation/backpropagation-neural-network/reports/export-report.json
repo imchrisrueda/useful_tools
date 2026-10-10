@@ -1,0 +1,19 @@
+{
+  "id": "exp-1791647561096",
+  "projectId": "proj-1791647561060-0gvf6a",
+  "revision": "58953649c92010f0693edab1bf30a3e4d3df62d6e41f36f91e0b49860ff6d4e0",
+  "format": "web",
+  "files": [
+    {
+      "path": "outputs\\proj-1791647561060-0gvf6a-bundle.html",
+      "hash": "01f67f5278eb141f8d03e812b09c2b85692c6e9c43fb9630abd64e1f7bac4846",
+      "mime": "text/html"
+    }
+  ],
+  "validationReportId": "val-1791647561090",
+  "compatibility": [],
+  "verification": [
+    "Manifest validated",
+    "Output generated and checksum verified"
+  ]
+}

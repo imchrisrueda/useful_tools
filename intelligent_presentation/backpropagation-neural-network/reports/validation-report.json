@@ -1,0 +1,34 @@
+{
+  "id": "val-1791647561090",
+  "projectId": "proj-1791647561060-0gvf6a",
+  "revision": "58953649c92010f0693edab1bf30a3e4d3df62d6e41f36f91e0b49860ff6d4e0",
+  "profile": "mvp",
+  "toolchain": {
+    "node": "v20.11.0",
+    "core": "0.1.0"
+  },
+  "inspected": [
+    {
+      "slideId": "slide-01",
+      "captureRef": "reports/captures/slide-01.png"
+    },
+    {
+      "slideId": "slide-02",
+      "captureRef": "reports/captures/slide-02.png"
+    },
+    {
+      "slideId": "slide-03",
+      "captureRef": "reports/captures/slide-03.png"
+    },
+    {
+      "slideId": "slide-04",
+      "captureRef": "reports/captures/slide-04.png"
+    },
+    {
+      "slideId": "slide-05",
+      "captureRef": "reports/captures/slide-05.png"
+    }
+  ],
+  "findings": [],
+  "result": "pass"
+}

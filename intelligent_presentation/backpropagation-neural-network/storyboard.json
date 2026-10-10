@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "1.0",
+  "projectId": "proj-1791647561060-0gvf6a",
+  "requirementsRevision": "c8ef99643f7c83ad9c6f4e260aaac62aeb7567f1aa5abf1754c79aacf4abcf1f",
+  "slides": [
+    {
+      "slideId": "slide-01",
+      "purpose": "Portada oficial y fundamentos",
+      "message": "Fundamentos matemáticos y algoritmo de backpropagation",
+      "sourceIds": [
+        "deep-learning-goodfellow-ch06"
+      ],
+      "assetIds": [],
+      "estimatedSeconds": 90
+    },
+    {
+      "slideId": "slide-02",
+      "purpose": "Arquitectura de red de 1 capa oculta",
+      "message": "Topología 2-3-1, matrices de pesos W(1), W(2) y función de activación sigmoide",
+      "sourceIds": [
+        "deep-learning-goodfellow-ch06"
+      ],
+      "assetIds": [],
+      "estimatedSeconds": 150
+    },
+    {
+      "slideId": "slide-03",
+      "purpose": "Forward pass y evaluación del error",
+      "message": "Flujo de propagación hacia adelante y función de pérdida cuadrática MSE",
+      "sourceIds": [
+        "deep-learning-goodfellow-ch06"
+      ],
+      "assetIds": [],
+      "estimatedSeconds": 150
+    },
+    {
+      "slideId": "slide-04",
+      "purpose": "Demostración dinámica con Manim",
+      "message": "Animación Manim mostrando paso del gradiente y ajuste gradual de pesos en 3 épocas",
+      "sourceIds": [
+        "deep-learning-goodfellow-ch06"
+      ],
+      "assetIds": [
+        "backprop_animation.mp4",
+        "backprop_poster.png"
+      ],
+      "estimatedSeconds": 240
+    },
+    {
+      "slideId": "slide-05",
+      "purpose": "Actualización y convergencia",
+      "message": "Regla de descenso de gradiente y curva empírica de convergencia hacia pérdida mínima",
+      "sourceIds": [
+        "deep-learning-goodfellow-ch06"
+      ],
+      "assetIds": [
+        "fig-01-loss-curve"
+      ],
+      "estimatedSeconds": 150
+    }
+  ],
+  "unresolvedItems": []
+}

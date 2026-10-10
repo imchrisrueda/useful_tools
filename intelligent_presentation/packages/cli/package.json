@@ -1,0 +1,23 @@
+{
+  "name": "@ips/cli",
+  "version": "0.1.0",
+  "description": "Command-line interface and diagnostic tooling for IPS",
+  "type": "module",
+  "bin": {
+    "ips": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit",
+    "test": "node --test dist/commands.test.js"
+  },
+  "dependencies": {
+    "@ips/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0",
+  "projectId": "proj-1791647561060-0gvf6a",
+  "objective": "Demostrar el algoritmo de backpropagation en una red neuronal con 1 capa oculta y el ajuste gradual de pesos",
+  "audience": "Investigadores, ingenieros y estudiantes de Inteligencia Artificial",
+  "durationMinutes": 15,
+  "requiredTopics": [
+    "Introducción a Backpropagation",
+    "Topología y Arquitectura (1 capa oculta)",
+    "Forward Pass y Función de Pérdida",
+    "Animación Manim: Retropropagación y Pesos",
+    "Regla de Actualización y Convergencia"
+  ],
+  "outputs": [
+    "web",
+    "pdf"
+  ],
+  "constraints": [
+    "Exactamente 5 diapositivas estructuradas",
+    "Animación explicativa en Manim con 1 capa oculta",
+    "Ajuste gradual de pesos demostrado visualmente"
+  ],
+  "unresolvedQuestions": []
+}

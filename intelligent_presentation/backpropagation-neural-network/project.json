@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "1.0",
+  "projectId": "proj-1791647561060-0gvf6a",
+  "title": "Backpropagation en Redes Neuronales",
+  "language": "es",
+  "aspectRatio": "16/9",
+  "engine": {
+    "id": "slidev",
+    "version": "53.0.0"
+  },
+  "designRef": "prop-tech-keynote",
+  "artifacts": {
+    "manifest": "project.json",
+    "slidesDir": "slides",
+    "dataDir": "data",
+    "assetsDir": "assets",
+    "reportsDir": "reports",
+    "outputsDir": "outputs",
+    "requirements": "requirements.json",
+    "storyboard": "storyboard.json",
+    "approval:storyboard": "reports\\approvals\\storyboard-app-evaluador-01.json",
+    "entry": "slides.md",
+    "dependencyIndex": "dependency-index.json",
+    "slides": "slides",
+    "validationReport": "reports/validation-report.json",
+    "approval:export": "reports\\approvals\\export-app-entrega-01.json",
+    "exportReport": "reports/export-report.json"
+  },
+  "toolchain": {
+    "node": "v20.11.0",
+    "core": "0.1.0"
+  }
+}

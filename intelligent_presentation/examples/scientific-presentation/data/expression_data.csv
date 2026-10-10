@@ -1,0 +1,6 @@
+group,expression_level,p_value
+Control,10.2,0.05
+Compound_A,24.6,0.003
+Compound_B,38.9,0.0002
+Compound_C,15.1,0.02
+Combination_AB,52.4,0.00001
